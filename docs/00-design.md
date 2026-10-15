@@ -228,6 +228,19 @@ All written in this repository:
 `idw+noise` is the simplest generative model to beat. `regress` shows what
 diffusion adds beyond its own conditional mean.
 
+Details (`imonet.baselines`):
+
+- `idw` weights a neighbour by exp(−d²/2ℓ²)/σ̄², σ̄ its median formal σ over
+  the window, over the neighbours with data on each day. ℓ is chosen from
+  {10, 25, 50, 100, 200, 500 km, ∞} per density, by the fast nRMSE on
+  validation days with 200 normal stations as targets (each predicted
+  without itself), so the held-out stations play no part in it.
+- `idw+noise` fits, per window and component, P(f) = A + B/f to the
+  periodogram of each neighbour's departure from its own `idw` prediction
+  (least squares over 1/64–0.5 cycles/day, A, B ≥ 0), takes the median A
+  and B over the neighbours, and adds noise with that spectrum, made on
+  twice the window length and cut so it does not wrap around.
+
 ## 6. Experiments
 
 ### 6.1 A — Held-out stations
@@ -257,8 +270,47 @@ about two months, as in gnssdl) and the slow part, and on the total.
 | --- | --- |
 | Point | normalised RMSE of the sample mean (gnssdl's measure) |
 | Probabilistic | CRPS; energy score over E, N, U; coverage of the 50% and 90% intervals; spread against error |
-| Realism | power spectrum of single samples against the real station's (spectral index, white and flicker amplitudes); per-component scale; correlation with neighbours against distance |
+| Realism | power spectrum of single samples against the real station's, by period band; per-component scale; correlation with neighbours against distance |
 | Overall | accuracy of a classifier trained to tell real windows from generated ones (0.5 is indistinguishable) |
+
+How they are computed (`imonet.metrics`, `imonet.evaluate`):
+
+- **Normalisation and summary, as gnssdl** (contract §4). Errors are in
+  units of the station's robust training-years scale; every score is
+  computed per station (at least 20 scored days) and summarised by the
+  median over stations; a component-free name (`nrmse_fast`) is the mean of
+  the E, N, U medians. The same stations and days are left out: days within
+  ±30 of an M ≥ 6 earthquake NGL lists for the station (fast and slow parts
+  only), and stations failing gnssdl's scoring QC (19 of the 173 held-out
+  stations on the California cube). Check: `zero` scores a fast nRMSE of
+  0.729 on the held-out stations, gnssdl's M0 0.728.
+- **Fast and slow parts.** The slow part is the 61-day running median over
+  the scored days. nRMSE splits the error of the sample mean, as gnssdl.
+  CRPS and coverage on the fast part split the truth and each sample
+  separately (a median of differences is not a difference of medians).
+- **CRPS and energy score** use the fair ensemble estimators (unbiased for
+  the members' distribution). A one-sample method is a point forecast: its
+  CRPS is its absolute error, and coverage, spread and realism scores are
+  not defined for it.
+- **Coverage** uses Weibull plotting positions (the i-th of m sorted members
+  at i/(m+1)), under which a draw from the members' distribution is inside
+  a 90% interval 90% of the time. Numpy's default positions give about 85%
+  for 32 members.
+- **Spread against error**: ensemble spread (with the (m+1)/m finite-
+  ensemble factor) divided by the RMSE of the sample mean, total part; 1 is
+  calibrated.
+- **Spectra**: periodograms of 256-day segments of the scored period with at
+  least 90% of days (gaps filled linearly, line removed, Hann taper), as
+  log10 of sample over truth in bands of 2–4, 4–8, …, 64–128 days; samples
+  are cut to the truth's days first. **Scale**: log2 of the robust scale of
+  each sample's fast part over the truth's.
+- **Neighbour correlation**: correlation of the fast parts of target and
+  neighbour over each window, truth and samples, averaged by distance bin
+  (0–10, 10–25, 25–50, 50–100, 100–200, 200–300 km).
+- **The classifier test is built in step 4**, with the diffusion model.
+
+Results are written to `runs/A/<method>/<split>/<density>_s<seed>/` (not
+`data/`, which is shared with gnssdl); `imonet report` prints the table.
 
 ### 6.2 B — Planted realistic events (California only, for now)
 

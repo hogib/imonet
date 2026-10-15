@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from imonet!")
+from imonet.cli import main
+
+__all__ = ["main"]

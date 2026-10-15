@@ -11,3 +11,6 @@ wheels/
 
 # Symlink to gnssdl data (no trailing slash: a "data/" pattern would not match a symlink)
 /data
+
+# Results of imonet runs (data/ is shared with gnssdl)
+/runs/
