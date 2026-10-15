@@ -3,7 +3,7 @@ import pytest
 from torch.utils.data import DataLoader
 
 from imonet.cube import HELD_OUT, NORMAL, TEST, TRAIN, VALIDATION, Cube, pairwise_km
-from imonet.data import (ThinningBank, component_scale, context, day_of_year, training_windows,
+from imonet.data import (ThinningBank, component_scale, context, day_of_year, detrend, training_windows,
                          validation_windows)
 from imonet.network import spacing_km
 
@@ -64,7 +64,8 @@ def test_context_values_and_padding(cube, scale):
     for slot in np.flatnonzero(v):
         s, ok = nbr[slot], out["y_ok"][slot]
         assert (ok == cube.avail[s, t0:t0 + L]).all()
-        assert np.allclose(out["y"][slot][ok], cube.r[s, t0:t0 + L][ok] / scale)
+        want = detrend(np.nan_to_num(cube.r[s, t0:t0 + L] / scale), ok)
+        assert np.allclose(out["y"][slot], want, atol=1e-5)
         assert not out["y"][slot][~ok].any()
 
 
@@ -92,7 +93,7 @@ def test_training_samples(cube, scale, train):
         assert (cube.split_day[t0:t0 + L] == TRAIN).all()
         ok = cube.trainable()[s, t0:t0 + L]
         assert (b["x_ok"] == ok).all() and ok.mean() >= 0.5
-        assert np.allclose(b["x"][ok], cube.r[s, t0:t0 + L][ok] / scale)
+        assert np.allclose(b["x"], detrend(np.nan_to_num(cube.r[s, t0:t0 + L] / scale), ok), atol=1e-5)
         assert s not in nbr
         assert (cube.split_sta[nbr[v]] == NORMAL).all()
         assert (b["geom"][v, 2] > b["min_km"]).all()
@@ -124,3 +125,33 @@ def test_collates_into_batches(train):
     assert batch["y"].shape == (8, K, L, 3)
     assert batch["geom"].shape == (8, K, 3)
     assert batch["valid"].dtype.is_floating_point is False
+
+
+def test_detrend_removes_mean_and_line_over_available_days():
+    rng = np.random.default_rng(0)
+    t = np.arange(50, dtype=float)
+    noise = rng.normal(size=(50, 3))
+    x = 3.0 + 0.2 * t[:, None] * np.array([1, -1, 2]) + noise
+    ok = rng.random(50) > 0.3
+    out = detrend(x, ok)
+    assert not out[~ok].any()
+    a = np.stack([np.ones(ok.sum()), t[ok]], axis=1)
+    assert np.abs(a.T @ out[ok]).max() < 1e-3                 # orthogonal to mean and line
+    want = noise[ok] - a @ np.linalg.lstsq(a, noise[ok], rcond=None)[0]
+    assert np.allclose(out[ok], want, atol=1e-4)
+
+
+def test_detrend_keeps_every_day_of_generated_series_and_batches():
+    x = np.random.default_rng(1).normal(size=(4, 2, 30, 3))
+    ok = np.ones((4, 2, 30), bool)
+    ok[..., 10:] = False
+    full = detrend(x, ok[:, :1], zero_missing=False)
+    assert full.shape == x.shape and np.all(full[..., 10:, :] != 0)
+    assert np.allclose(full[1, 0], detrend(x[1, 0], ok[1, 0], zero_missing=False), atol=1e-5)
+
+
+def test_detrend_with_one_day_removes_the_mean_only():
+    x = np.arange(12, dtype=float).reshape(4, 3)
+    ok = np.array([False, True, False, False])
+    out = detrend(x, ok, zero_missing=False)
+    assert np.allclose(out, x - x[1])

@@ -5,6 +5,13 @@ All series are in scaled units: residuals and σ divided by a fixed
 per-component scale (`component_scale`), missing values set to 0 with a
 mask beside them.
 
+Every series in a window, target and neighbours, has its own least-squares
+mean and line over its available days removed (`detrend`). In the
+validation and test years the residuals carry an offset and trend that the
+training years do not: the trajectory was fitted on the training years, so
+later residuals include its extrapolation error. That is trajectory, which
+imonet does not generate (docs/00-design.md §2, §4.1).
+
 A sample is a dict of numpy arrays, ready for torch's default collate:
 
 | Key | Shape | Meaning |
@@ -76,7 +83,7 @@ def context(
     y_ok = np.zeros((k, length), dtype=bool)
     geom = np.zeros((k, 3), dtype=np.float32)
     y_ok[:m] = ok[sta, win]
-    y[:m] = np.where(y_ok[:m, :, None], cube.r[sta, win] / scale, 0.0)
+    y[:m] = detrend(np.where(y_ok[:m, :, None], cube.r[sta, win] / scale, 0.0), y_ok[:m])
     y_sigma[:m] = np.where(y_ok[:m, :, None], cube.sigma[sta, win] / scale, 0.0)
     geom[:m] = np.stack([nb.east_km[v], nb.north_km[v], nb.dist_km[v]], axis=1)
     nbr = np.full(k, -1, dtype=np.int64)
@@ -89,8 +96,30 @@ def target(cube: Cube, scale: np.ndarray, s: int, t0: int, ok: np.ndarray,
     """Station s's own series over the window, and the days in the loss."""
     win = slice(t0, t0 + length)
     x_ok = ok[s, win]
-    x = np.where(x_ok[:, None], cube.r[s, win] / scale, 0.0).astype(np.float32)
+    x = detrend(np.where(x_ok[:, None], cube.r[s, win] / scale, 0.0), x_ok)
     return {"x": x, "x_ok": x_ok}
+
+
+def detrend(x: np.ndarray, ok: np.ndarray, zero_missing: bool = True) -> np.ndarray:
+    """x (…×L×C) minus its least-squares mean and line over the days in ok
+    (…×L), fitted per series and component and removed on every day; then
+    set to 0 where not ok, unless `zero_missing` is off (generated series,
+    which have every day). With fewer than two days only the mean is
+    removed. float32."""
+    length = x.shape[-2]
+    t = (np.arange(length) - (length - 1) / 2) / length                   # centred, O(1)
+    w = ok.astype(np.float64)[..., None]                                    # …×L×1
+    tt = t[:, None]
+    n, st, stt = w.sum(-2), (w * tt).sum(-2), (w * tt ** 2).sum(-2)          # …×1
+    sx, stx = (w * x).sum(-2), (w * tt * x).sum(-2)                         # …×C
+    det = n * stt - st ** 2
+    line = det > 1e-12 * np.maximum(n, 1) ** 2
+    b = np.where(line, (n * stx - st * sx) / np.where(line, det, 1.0), 0.0)
+    a = (sx - b * st) / np.maximum(n, 1)
+    out = x - a[..., None, :] - b[..., None, :] * tt
+    if zero_missing:
+        out = np.where(ok[..., None], out, 0.0)
+    return out.astype(np.float32)
 
 
 def day_of_year(day: np.datetime64) -> float:

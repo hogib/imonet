@@ -7,6 +7,10 @@ period end and scores only the days no earlier window covered. Each target
 is predicted from the normal stations, thinned to the density, with the
 target itself always removed, and every usable day as input.
 
+Truth and samples are compared after removing each window's mean and line,
+fitted over the target's days with data (`imonet.data.detrend`), the same
+for both, as the model's inputs and training targets are.
+
 Results go to runs/A/<method>/<split>/<density>_s<seed>/:
 summary.json, stations.csv, correlations.csv (neighbour correlation by
 distance).
@@ -24,7 +28,7 @@ import pandas as pd
 
 from imonet.baselines import LENGTH_SCALES_KM, Method, make
 from imonet.cube import HELD_OUT, NORMAL, VALIDATION, Cube, pairwise_km
-from imonet.data import WINDOW_DAYS, component_scale, context
+from imonet.data import WINDOW_DAYS, component_scale, context, detrend, target
 from imonet.metrics import (correlation_by_distance, event_mask, neighbour_correlations, scoring_qc,
                             station_scale, station_scores, summarise)
 from imonet.network import K_NEIGHBOURS, thin
@@ -67,7 +71,8 @@ def network(cube: Cube, density: float | None, seed: int) -> np.ndarray:
 class Prediction:
     targets: np.ndarray         # S' cube indices
     days: np.ndarray            # T' cube day indices of the split
-    samples: np.ndarray         # m×S'×T'×3 mm, NaN where not predicted
+    truth: np.ndarray           # S'×T'×3 mm, detrended per window, NaN where missing
+    samples: np.ndarray         # m×S'×T'×3 mm, detrended per window, NaN where not predicted
     windows: list[dict]         # per (target, window): ti, t0, scored, nbr, dist_km
 
 
@@ -78,27 +83,32 @@ def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, 
     wins = period_windows(cube, split, length)
     days = np.arange(wins[0][0], wins[-1][0] + length)
     out = np.full((method.n_samples, len(targets), len(days), 3), np.nan, dtype=np.float32)
+    truth = np.full((len(targets), len(days), 3), np.nan, dtype=np.float32)
     jobs = [(ti, t0, first) for ti, s in enumerate(targets) for t0, first in wins
             if ok[s, first:t0 + length].any()]
     records = []
     for a in range(0, len(jobs), BATCH):
         chunk = jobs[a:a + BATCH]
-        ctxs = []
+        ctxs, truths = [], []
         for ti, t0, _ in chunk:
             s = targets[ti]
             ctx = context(cube, scale, cube.lat[s], cube.lon[s], t0, net[net != s], ok, length, k)
-            ctx |= {"target": s, "t0": t0}
-            ctxs.append(ctx)
+            ctxs.append(ctx | {"target": s, "t0": t0})
+            truths.append(target(cube, scale, s, t0, ok, length))   # kept from the method
         batch = {key: np.stack([np.asarray(c[key]) for c in ctxs]) for key in ctxs[0]}
+        x_ok = np.stack([t["x_ok"] for t in truths])
         rng = np.random.default_rng((seed, a))
-        x = method.sample(batch, rng) * scale                               # B×m×L×3 mm
+        x = method.sample(batch, rng)                                       # B×m×L×3
+        x = detrend(x, x_ok[:, None], zero_missing=False) * scale
+        z = np.where(x_ok[..., None], np.stack([t["x"] for t in truths]) * scale, np.nan)
         for i, (ti, t0, first) in enumerate(chunk):
-            lo = first - t0
-            out[:, ti, first - days[0]:t0 + length - days[0]] = x[i, :, lo:]
+            lo, cols = first - t0, slice(first - days[0], t0 + length - days[0])
+            out[:, ti, cols] = x[i, :, lo:]
+            truth[ti, cols] = z[i, lo:]
             v = batch["valid"][i]
             records.append({"ti": ti, "t0": t0, "scored": first, "nbr": batch["nbr"][i, v],
                             "dist_km": batch["geom"][i, v, 2]})
-    return Prediction(targets, days, out, records)
+    return Prediction(targets, days, truth, out, records)
 
 
 def score(cube: Cube, pred: Prediction, scales: np.ndarray, skip: np.ndarray, keep: np.ndarray,
@@ -108,9 +118,9 @@ def score(cube: Cube, pred: Prediction, scales: np.ndarray, skip: np.ndarray, ke
     for ti, s in enumerate(pred.targets):
         if not keep[s]:
             continue
-        truth = np.where(cube.avail[s, pred.days, None], cube.r[s, pred.days], np.nan)
+        truth = pred.truth[ti]
         samples = pred.samples[:, ti]
-        cells = cube.avail[s, pred.days] & np.isfinite(samples[0]).all(axis=1)
+        cells = np.isfinite(truth).all(axis=1) & np.isfinite(samples[0]).all(axis=1)
         row = station_scores(truth, samples, cells, skip[s, pred.days], scales[s])
         if row is not None:
             rows.append({"station": str(cube.sta[s]), **row})
@@ -124,7 +134,7 @@ def score(cube: Cube, pred: Prediction, scales: np.ndarray, skip: np.ndarray, ke
             win = np.arange(w["t0"], w["t0"] + length)
             cols = win - pred.days[0]
             cells = cube.avail[s, win] & ~skip[s, win] & (win >= w["scored"])
-            truth = np.where(cube.avail[s, win, None], cube.r[s, win], np.nan)
+            truth = pred.truth[w["ti"], cols]
             nbr = np.where(cube.avail[w["nbr"]][:, win, None], cube.r[w["nbr"]][:, win], np.nan)
             corr = neighbour_correlations(truth, pred.samples[:, w["ti"], cols], nbr, cells)
             for j, d in enumerate(w["dist_km"]):

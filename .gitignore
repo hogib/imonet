@@ -14,3 +14,14 @@ wheels/
 
 # Results of imonet runs (data/ is shared with gnssdl)
 /runs/
+
+# LaTeX builds (figures/ is tracked so the paper builds without the data)
+/paper/*.pdf
+/paper/*.aux
+/paper/*.bbl
+/paper/*.blg
+/paper/*.log
+/paper/*.out
+/paper/*.fls
+/paper/*.fdb_latexmk
+/paper/*.synctex.gz

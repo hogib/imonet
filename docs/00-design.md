@@ -382,9 +382,13 @@ src/imonet/
   metrics.py     CRPS, coverage, spectra, classifier test, ρ, spurious signal
   train.py
   evaluate.py
+  figures/       figures and tables for the report and the paper (`imonet figures`)
   cli.py
 tests/           unit tests on synthetic data
 docs/            this document and later design notes
+paper/           report.tex (working report, drafted with Claude Code), paper.tex
+                 (the paper, written by the authors), references.bib, figures/,
+                 Makefile (`make`, `make figures`); Elsevier elsarticle format
 ```
 
 Dependencies: numpy, pandas, scipy, torch, cutde.

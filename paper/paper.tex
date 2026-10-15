@@ -1,0 +1,67 @@
+\documentclass[preprint,12pt,authoryear]{elsarticle}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}}
+
+\journal{(journal to be decided)}
+
+\begin{document}
+
+\begin{frontmatter}
+
+% Title to be written.
+\title{TITLE}
+
+\author[ytu]{H. O\u{g}uz Bolat\corref{cor}}
+\ead{oguz.bolat@std.yildiz.edu.tr}
+\cortext[cor]{Corresponding author}
+\author[ytu]{\.{I}smail Haydar \.{I}mamo\u{g}lu}
+\affiliation[ytu]{organization={Department of Geomatics Engineering, Y{\i}ld{\i}z Technical University},
+  city={Istanbul}, country={T\"urkiye}}
+
+\begin{abstract}
+% Abstract.
+\end{abstract}
+
+\begin{keyword}
+% Keywords, separated by \sep.
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+% Motivation: sparse networks; why a generative model (neighbours explain
+% only part of a station's series).
+
+\section{Data}
+% California cube; T\"urkiye cube; splits; held-out stations.
+
+\section{Method}
+% Problem; network thinning; conditional diffusion model.
+
+\section{Experiments}
+% A: held-out stations. B: planted fault-slip events. C: T\"urkiye and
+% Kahramanmara\c{s}.
+
+\section{Results}
+
+\section{Discussion}
+
+\section{Conclusions}
+
+\section*{Data availability}
+% GNSS time series: Nevada Geodetic Laboratory \citep{blewitt2018}.
+
+\bibliographystyle{elsarticle-harv}
+\bibliography{references}
+
+\end{document}

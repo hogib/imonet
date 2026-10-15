@@ -1,0 +1,242 @@
+\documentclass[preprint,12pt,authoryear]{elsarticle}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}}
+
+% A figure or table that exists only once its results have been run.
+\newcommand{\maybefigure}[2]{\IfFileExists{figures/#1.pdf}{\includegraphics[width=#2]{#1}}{\fbox{\parbox{0.9\linewidth}{\centering\small figures/#1.pdf not made yet (\texttt{make figures})}}}}
+\newcommand{\maybetable}[1]{\IfFileExists{figures/#1.tex}{\input{figures/#1.tex}}{\fbox{\small figures/#1.tex not made yet (\texttt{make figures})}}}
+
+\journal{(journal to be decided)}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Generating virtual GNSS stations from their neighbours with a conditional diffusion model: design and baselines\tnoteref{wr}}
+\tnotetext[wr]{Working report, drafted with Claude Code. It records the state of the project and is updated as results come in.}
+
+\author[ytu]{H. O\u{g}uz Bolat\corref{cor}}
+\ead{oguz.bolat@std.yildiz.edu.tr}
+\cortext[cor]{Corresponding author}
+\author[ytu]{\.{I}smail Haydar \.{I}mamo\u{g}lu}
+\affiliation[ytu]{organization={Department of Geomatics Engineering, Y{\i}ld{\i}z Technical University},
+  city={Istanbul}, country={T\"urkiye}}
+
+\begin{abstract}
+Continuous GNSS networks are dense in a few regions and sparse in most others, yet many applications need displacement time series at locations without a station. We propose to generate daily residual series at arbitrary locations from the stations around them with a conditional diffusion model, and to judge the generated series as samples rather than as point predictions. Because a station's series is only partly predictable from its neighbours, a regression model returns series that are too smooth; a generative model can reproduce the station-specific noise while inheriting the shared signal. The model is trained and validated on 1,251 stations in and around California, where real stations can be hidden and their generated counterparts compared with the truth, and tested on the network of T\"urkiye, whose median nearest-neighbour distance (60~km) is about six times California's. To learn sparse geometries from a dense network, training samples are drawn from networks thinned by minimum-separation thinning, which, unlike random subsampling, reproduces the station spacing of T\"urkiye. We describe the data, the sampling design and the evaluation protocol, which combines point, probabilistic and realism scores with planted fault-slip events, and report three baselines against which the diffusion model will be measured. On held-out stations, the short-period error of a weighted neighbour mean depends little on network density, because the shared short-period signal is dominated by common-mode error coherent over hundreds of kilometres. Adding white and flicker noise fitted to the neighbours yields a well-calibrated generative baseline, with a continuous ranked probability score 26\% below that of the mean alone, but its samples do not reproduce the decrease of inter-station correlation with distance.
+\end{abstract}
+
+\begin{keyword}
+GNSS time series \sep virtual stations \sep network densification \sep diffusion models \sep probabilistic evaluation
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+\label{sec:intro}
+
+Daily position time series from continuous GNSS stations record interseismic loading, coseismic offsets, postseismic relaxation, slow slip and environmental loading. The Nevada Geodetic Laboratory (NGL) processes more than 17,000 stations worldwide with a uniform strategy \citep{blewitt2018,ngl2026}, but their distribution is very uneven: in California the median distance between a station and its nearest neighbour is 9~km, whereas in T\"urkiye, one of the most seismically active countries in the world, it is 60~km. Deformation with a footprint smaller than the station spacing, such as shallow slow slip or afterslip on a single fault segment, is then recorded by a few stations at most, or not at all.
+
+This paper asks whether the series that a station \emph{would} record at a location without one can be generated from the stations around it. Spatial interpolation of displacement is classical, and graph neural networks have been used to estimate time series at unobserved locations of sensor networks \citep{wu2021ignnk} and to impute missing observations \citep{cini2022grin,marisca2022spin}. These methods return a single prediction. For GNSS series this is a limitation in principle rather than in degree: a station's daily residual is the sum of a part shared with its neighbours, namely common-mode error from orbits, clocks and the reference frame, environmental loading and tectonic transients \citep{wdowinski1997,dong2006,kreemer2021,li2025loading}, and a part that is its own, namely monument instability, multipath and other site effects, whose temporally correlated noise is well documented \citep{williams2004,langbein2008}. The second part cannot be predicted from other stations. Predicting a station from its neighbours is also the basis of recent network filtering, where the prediction is subtracted as noise \citep{bachelot2025}; there, the unpredictable remainder is the desired output. Here it is the part to be reproduced.
+
+In the benchmark that preceded this work, the best deterministic predictor from neighbours reduced the median normalised error of a held-out station's short-period variations only from 0.73, for predicting zero, to about 0.52. A regression model would therefore generate virtual stations that are systematically too smooth and too quiet, with too little variance and the wrong spectrum. A conditional generative model can instead draw the station-specific part from a learned distribution while taking the shared part from the neighbours. We use a conditional diffusion model \citep{ho2020ddpm,karras2022edm}, whose samples can be scored against the truth with proper scoring rules \citep{gneiting2007} and whose realism can be checked against the spectra and spatial correlations of real stations.
+
+The study is designed around network densification. The model is trained and validated in California, where 173 stations are held out of training entirely and their generated counterparts compared with their real series, and it is tested without any tuning in T\"urkiye. Section~\ref{sec:data} describes the data, Section~\ref{sec:method} the problem, the sampling design and the baselines, and Section~\ref{sec:eval} the evaluation protocol. Section~\ref{sec:results} reports the baselines, and Section~\ref{sec:status} the decisions taken so far and the work that remains.
+
+\section{Data}
+\label{sec:data}
+
+\subsection{California}
+
+We use the daily IGS20 solutions of NGL for 1,251 stations in and around California, from 2008-01-01 to 2026-09-26 (6,844 days), as assembled in the data cube of the preceding benchmark. For each station and component, a constant, a rate, annual and semi-annual terms and steps are fitted to the years 2008--2019; the residuals of this fit are the data. Equipment steps are estimated and removed; earthquake offsets are kept, since they are spatially coherent signal that a virtual station should reproduce. Outliers more than five robust standard deviations from a 61-day running median are removed, as are stations with excessive scatter (groundwater subsidence, unstable monuments) and the less complete member of any pair of stations closer than 1~km.
+
+The years 2008--2019 are used for training, 2020--2021 for validation and 2022 onward for testing. Of the stations, 173 are held out (Figure~\ref{fig:network}). Held-out stations are excluded from training entirely: they are never a training target, never a neighbour, and never part of the input network when another station is the target. They serve only as evaluation targets. Days around the 2019 Ridgecrest earthquakes are excluded from training.
+
+\begin{figure}[t]
+\centering
+\maybefigure{network_map}{0.55\linewidth}
+\caption{The California network: 1,078 stations used for training and as inputs, and 173 held-out stations used only as evaluation targets.}
+\label{fig:network}
+\end{figure}
+
+The residuals are heavy-tailed. Their robust scale over the training data ($1.4826$ times the median absolute deviation) is 2.12, 2.24 and 5.60~mm for east, north and up, whereas their standard deviations are 9.1, 15.3 and 10.3~mm, dominated by the coseismic offsets of the 2010 El Mayor--Cucapah earthquake, which reach about 200~mm. All series are divided by the robust scale.
+
+\subsection{T\"urkiye}
+
+NGL provides about 175 stations in T\"urkiye with at least three years of data. A data cube will be built from them with the same steps, with the trajectory fitted on data up to 2019 so that, as in California, all scored days lie outside the fit. The T\"urkiye data are used only for testing. The period from 30 days before to 365 days after the 2023-02-06 Kahramanmara\c{s} earthquakes ($M_w$~7.8 and 7.6), whose coseismic offsets reach metres, is kept out of the main scores and studied separately.
+
+\subsection{Removal of each window's mean and trend}
+\label{sec:detrend}
+
+Residuals in the validation and test years differ systematically from those in the training years: because the trajectory was fitted to the training years, later residuals contain its extrapolation error, an offset and a drift that grow with time. Table~\ref{tab:drift} quantifies this for the held-out stations. Over 256-day windows, the slow part of the series, its 61-day running median, is about twice as large in the validation years as in the training years. After each window's least-squares mean and linear trend are removed, the two periods are indistinguishable; removing the mean alone is not sufficient for the vertical component.
+
+\begin{table}[t]
+\centering
+\caption{Median root-mean-square of the slow part per 256-day window for the held-out stations, in units of each station's robust scale.}
+\label{tab:drift}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{3}{c}{Training years} & \multicolumn{3}{c}{Validation years} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Removed from each window & E & N & U & E & N & U \\
+\midrule
+Nothing & 0.57 & 0.67 & 0.52 & 1.07 & 1.15 & 0.77 \\
+Mean & 0.35 & 0.30 & 0.28 & 0.24 & 0.35 & 0.42 \\
+Mean and trend & 0.29 & 0.21 & 0.21 & 0.18 & 0.25 & 0.20 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The offset and trend are properties of the trajectory model, which is outside the scope of this work. We therefore remove from every series in a window, target and neighbours alike, its own least-squares mean and trend over its available days, in training as in evaluation, and compare generated samples with the truth after the same removal.
+
+\section{Method}
+\label{sec:method}
+
+\subsection{Problem}
+
+Let $\mathbf{x} \in \mathbb{R}^{L \times 3}$ be the residual series of a target location over a window of $L = 256$ days, in east, north and up. The conditioning information $\mathcal{C}$ consists of the $K = 16$ nearest stations of a network within 300~km of the target. For each neighbour $k$ it holds its series $\mathbf{y}_k \in \mathbb{R}^{L \times 3}$, its availability mask, its formal standard errors, and its east and north offset from the target in kilometres. Missing days are set to zero and flagged; unused neighbour slots are padded and masked. A neighbour counts only if at least a quarter of its window is available, so that no slot is spent on a station that is not recording. The target's absolute coordinates are not part of $\mathcal{C}$, so that a model trained in California can be applied elsewhere. The task is to draw samples from $p(\mathbf{x} \mid \mathcal{C})$.
+
+\subsection{Training samples and network thinning}
+\label{sec:thinning}
+
+A training sample is a target station, a window lying entirely in the training years in which at least half of the target's days are available, and a network. Every admissible (station, window) pair is equally likely. The target's missing days are excluded from the loss.
+
+Because the California network is far denser than the networks the model is meant for, each training network is thinned. In 80\% of samples the network is thinned to a median nearest-neighbour distance drawn log-uniformly from 10 to 100~km, and stations closer to the target than a distance drawn log-uniformly from 1 to 100~km are removed. The second rule prevents the model from relying on a nearby station and matches the intended use, a virtual station placed where there is none. In the remaining 20\% the full network is used with every neighbour, as in full-density evaluation: even the lightest thinning removes close pairs, whereas 13\% of the held-out stations have a training station within 5~km.
+
+We thin by greedy minimum-separation thinning. Stations are visited in random order and kept if no kept station lies within a separation $s$, and $s$ is chosen by bisection to reach the required median spacing. Random subsampling, the obvious alternative, preserves the clustering of the California network and cannot produce a network resembling T\"urkiye's (Table~\ref{tab:thinning}): thinned at random to T\"urkiye's 60~km median spacing, California retains only 11--23 stations, with a long tail of distances beyond 100~km, whereas minimum-separation thinning retains 110--118 stations and matches T\"urkiye's median and upper tail. It has fewer close pairs than T\"urkiye (10th percentile 55 against 29~km); whether this matters will be tested on T\"urkiye rather than tuned for. Figure~\ref{fig:thinning} shows the networks used for evaluation. Thinnings are precomputed (64 spacings, four seeds each), since one thinning takes up to 0.1~s.
+
+\begin{table}[t]
+\centering
+\caption{Nearest-neighbour distances of T\"urkiye's network and of California's thinned to the same median spacing, for three thinning seeds.}
+\label{tab:thinning}
+\small
+\begin{tabular}{lrccc}
+\toprule
+& & \multicolumn{3}{c}{Nearest neighbour (km)} \\
+\cmidrule(lr){3-5}
+Network & Stations & 10th pct. & Median & 90th pct. \\
+\midrule
+T\"urkiye ($\geq$ 3 years) & 174 & 29 & 60 & 77 \\
+California, all & 1,078 & 3 & 9 & 23 \\
+California, min.-separation & 110--118 & 53--56 & 60--61 & 72--73 \\
+California, random & 11--23 & 11--28 & 62--86 & 117--176 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\maybefigure{thinning}{\linewidth}
+\caption{The training network at the four evaluation densities (kept stations dark, removed stations light), and the distribution of nearest-neighbour distances at each.}
+\label{fig:thinning}
+\end{figure}
+
+\subsection{Conditional diffusion model}
+
+The model follows the EDM formulation of \citet{karras2022edm}. A one-dimensional U-Net over time denoises the target; at every resolution, each time patch attends to tokens of the neighbours for the same patch. The neighbour tokens are produced by a temporal convolution stack shared by all neighbours, with a geometry embedding of the neighbour's offset and distance. Conditioning is dropped for 10\% of training samples to allow classifier-free guidance \citep{ho2022cfg}. Samples of 256-day windows are generated independently, 32 per target and window. The model is being implemented; its design is described here so that the evaluation can be read against it.
+
+\subsection{Baselines}
+\label{sec:baselines}
+
+Three baselines define what the diffusion model has to improve on.
+\begin{description}
+\item[Zero] predicts zero.
+\item[IDW] predicts the weighted mean of the available neighbours on each day, with weights $w_k = \exp(-d_k^2 / 2\ell^2) / \bar\sigma_k^2$, where $d_k$ is the distance to neighbour $k$ and $\bar\sigma_k$ its median formal standard error in the window. The length scale $\ell$ is selected for each density among 10, 25, 50, 100, 200 and 500~km and $\infty$ by the short-period error on validation days, with 200 training stations as targets, each predicted without itself, so that the held-out stations play no part in the choice.
+\item[IDW + noise] adds to the IDW prediction white and flicker noise \citep{williams2004}, independently per component, with periodogram level $P(f) = A + B/f$. For each window, $A$ and $B$ are fitted by non-negative least squares over 1/64 to 0.5 cycles per day to the departure of each neighbour from its own IDW prediction, and the medians over the neighbours are used. Fitting both terms jointly matters, since flicker noise retains power at high frequencies, and least squares is preferred to medians of periodogram ordinates, whose exponential distribution would bias the levels low by a factor $\ln 2$. The noise is synthesised on twice the window length and truncated, so that it does not wrap around. This is the simplest generative model of a virtual station.
+\end{description}
+A fourth comparison, the diffusion model's network trained with a squared-error loss, will show what the generative formulation adds beyond its own conditional mean.
+
+\section{Evaluation}
+\label{sec:eval}
+
+\subsection{Experiment A: held-out stations}
+
+Each of the 173 held-out stations is generated from the training stations, thinned to one of four densities: the full network, and median spacings of 25, 60 and 100~km. The 60~km density matches T\"urkiye and is the main result. Each thinned density is repeated with five thinning seeds. The validation period is tiled with 256-day windows; the last window is aligned to the end of the period and scores only the days not covered by an earlier window. All decisions use the validation period; the test period is used once, for the final report.
+
+Errors are expressed in units of each station's robust scale over the training years, every score is computed per station, and stations are summarised by the median, following the preceding benchmark. Days within 30 days of an earthquake of magnitude 6 or more that NGL lists as possibly offsetting the station are excluded from the short- and long-period scores, and 19 held-out stations whose scatter increased more than threefold, or whose series jumped without a listed cause, after 2019 are excluded from scoring.
+
+\begin{description}
+\item[Point accuracy.] The error of the sample mean is split into a long-period part, its 61-day running median, and a short-period part, the remainder; the normalised root-mean-square error (nRMSE) of each, and of the total, is reported.
+\item[Probabilistic accuracy.] The continuous ranked probability score (CRPS) and its multivariate counterpart, the energy score \citep{gneiting2007}, are computed with the fair ensemble estimators of \citet{ferro2014}, which are unbiased for the distribution the samples are drawn from. For a point forecast the CRPS reduces to the absolute error. Coverage of the central 50\% and 90\% intervals is computed with Weibull plotting positions \citep{hyndman1996}, under which a draw from the ensemble's own distribution falls inside the 90\% interval with probability 0.9; the default positions of common software give about 0.85 for 32 members. The ratio of ensemble spread to the error of the ensemble mean is 1 for a calibrated ensemble. For the short-period scores the truth and each sample are decomposed separately.
+\item[Realism.] Single samples are compared with the truth in three ways: the ratio of their power spectral densities in six period bands from 2 to 128 days, the ratio of the robust scales of their short-period parts, and their correlation with the neighbours as a function of distance.
+\item[Indistinguishability.] A classifier trained to separate real from generated windows \citep{lopezpaz2017} will be added with the diffusion model.
+\end{description}
+
+\subsection{Experiment B: planted fault-slip events}
+
+To test whether localised transients are transferred to a virtual station, slow-slip and afterslip events are placed on fault surfaces of the SCEC Community Fault Model \citep{plesch2007,plesch2024cfm}, and their surface displacements are computed with triangular dislocations in an elastic half-space \citep{nikkhoo2015}. Each event is added to every station's real series, the held-out targets included. Each target is then generated twice with identical random seeds, once from the network with the event and once from the original network, so that the difference of the two sample means isolates what the model passed on from the event. The fraction of the planted signal recovered, its shape and timing, and the spurious signal at targets outside the event footprint are reported as functions of the ratio of event footprint to station spacing.
+
+\subsection{Experiment C: T\"urkiye}
+
+The trained model, without further tuning, generates each T\"urkiye station from all others and is scored as in experiment A at T\"urkiye's own density. The Kahramanmara\c{s} sequence is analysed separately: the coseismic offsets and the first year of postseismic deformation of virtual stations near the rupture are compared with the observed ones, as a function of distance from the rupture and from the nearest station.
+
+\section{Results}
+\label{sec:results}
+
+\subsection{Baselines on held-out stations}
+
+Table~\ref{tab:a} and Figure~\ref{fig:a} summarise experiment A for the three baselines on the validation period. Of the 173 held-out stations, 154 are scored; the others fail the scoring quality control or have fewer than 20 scored days.
+
+\begin{table}[t]
+\centering
+\caption{Experiment A on the validation period (2020--2021): median over 154 held-out stations, mean over five thinning seeds for the thinned densities. Subscripts $f$ and $t$ denote the fast part and the total; Cov$_{90,f}$ is the coverage of the 90\% interval of the fast part, Spread/err.\ the ratio of ensemble spread to the error of the ensemble mean, and log$_2$ scale the ratio of the short-period scale of single samples to that of the truth. Errors are in units of each station's robust scale; lower is better for nRMSE and CRPS, and 0.9, 1 and 0 are ideal for coverage, spread/error and log$_2$ scale. Coverage, spread and scale are not defined for point forecasts.}
+\label{tab:a}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\maybetable{experiment_a_table}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\maybefigure{scores_by_density}{\linewidth}
+\caption{Scores against network density. Lines are means over five thinning seeds and bands their range; dotted lines mark the ideal value.}
+\label{fig:a}
+\end{figure}
+
+\paragraph{Point accuracy depends little on density} Predicting a held-out station from its neighbours removes much of its short-period error: IDW reduces the fast nRMSE from 0.737 for predicting zero to 0.527 with the full network. The reduction hardly depends on density. At T\"urkiye's density of 60~km the fast nRMSE is 0.532, and even at 100~km it is 0.547. The length scales selected on validation are long (200~km to infinite), so all neighbours are weighted nearly equally. Both observations indicate that the short-period variability a station shares with its neighbours is dominated by common-mode error coherent over hundreds of kilometres \citep{wdowinski1997,dong2006}, which a sparse network samples almost as well as a dense one. Consequently, the short-period point scores of experiment A are only weakly sensitive to network density, and what densification contributes beyond the common mode has to be measured on spatially localised signals, the purpose of experiment B. After each window's mean and trend are removed, the slow part contributes little error (nRMSE 0.13 for IDW, 0.25 for zero).
+
+\paragraph{A noise model makes the mean a calibrated generator} Adding white and flicker noise to the IDW mean lowers the fast CRPS from 0.393 to 0.290 at full density and from 0.399 to 0.293 at 60~km, a reduction of 26\%. The mean of its 32 samples is slightly less accurate than IDW itself (fast nRMSE 0.536 against 0.527), since the mean of a finite ensemble retains part of the added noise. The samples are close to calibrated: the 90\% intervals cover 90--91\% of the fast part and the 50\% intervals 53--54\%; the ratio of spread to error of the total is 0.91; and the short-period scale of single samples exceeds that of the truth by 5--8\% ($\log_2$ ratio 0.07--0.11). Their spectra lie within $\pm 0.06$ in $\log_{10}$, about $\pm 15\%$, of the truth in every band from 2 to 128 days, with a consistent excess of 12--15\% at periods of 2--4 days in all components (Figure~\ref{fig:spectra}).
+
+\begin{figure}[t]
+\centering
+\maybefigure{spectra_60km}{\linewidth}
+\caption{Power of single samples relative to the truth by period band, IDW + noise at 60~km density (thinning seed 0); 0 is a perfect match.}
+\label{fig:spectra}
+\end{figure}
+
+\paragraph{The spatial structure is not reproduced} The correlation of a real station's short-period variations with those of its neighbours decreases with distance, from 0.50 within 10~km to 0.45--0.48 beyond (Figure~\ref{fig:corr}). The samples of IDW + noise correlate with their neighbours at 0.48--0.53 at all distances: more strongly than real stations do with distant neighbours, by 0.035--0.048 at full density, and without the decrease. A near-uniform weighted mean with independent noise reproduces the average amount of shared signal but not how it varies in space. Reproducing this structure is a specific requirement for the diffusion model. Figure~\ref{fig:example} shows one held-out station with its samples.
+
+\begin{figure}[t]
+\centering
+\maybefigure{correlation_60km}{0.6\linewidth}
+\caption{Correlation of the short-period parts of target and neighbour against their distance, for the truth and for samples of IDW + noise, at 60~km density (thinning seed 0). Within 10~km there are only 24 pairs at this density.}
+\label{fig:corr}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\maybefigure{example_idw_noise}{\linewidth}
+\caption{Held-out station ARTE in the first validation window, generated by IDW + noise from the network thinned to 60~km: eight of 32 samples, their mean, and the truth, after removal of the window's mean and trend.}
+\label{fig:example}
+\end{figure}
+
+\section{Status and decisions}
+\label{sec:status}
+
+The following decisions departed from the initial plan, each on the evidence given above: minimum-separation thinning replaced random subsampling (Table~\ref{tab:thinning}); a fifth of the training samples retain the full network with no minimum distance, and the minimum distance on thinned networks is drawn from 1--100~km instead of 10--100~km, raising the share of training samples with a neighbour within 5~km from 1\% to 3\%; each window's mean and trend are removed from every series (Table~\ref{tab:drift}); and the classifier test was moved from the baseline stage to the model stage. The remaining work is, in order, the diffusion model and its regression counterpart, experiment B, and the T\"urkiye data cube and experiment C. The baseline results set two concrete targets for the diffusion model: a short-period CRPS below 0.29 at 60~km density, and inter-station correlations that decrease with distance as those of real stations do.
+
+\bibliographystyle{elsarticle-harv}
+\bibliography{references}
+
+\end{document}

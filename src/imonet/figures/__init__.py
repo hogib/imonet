@@ -1,0 +1,44 @@
+"""Figures and tables for the report and the paper (`imonet figures`).
+
+Every figure is a function writing one PDF (or a .tex table) into an output
+directory, by default paper/figures/. Figures whose inputs do not exist yet
+(results not run) are skipped and reported.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from imonet.cube import Cube
+from imonet.evaluate import RESULTS
+
+FIGURES = ("network_map", "thinning", "scores_by_density", "correlation", "spectra", "example", "table")
+
+
+def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "validation",
+             only: tuple[str, ...] = FIGURES) -> dict[str, Path | None]:
+    from imonet.figures import experiment_a as A
+    from imonet.figures import network as N
+
+    made: dict[str, Path | None] = {}
+    runs = A.load_runs(split, results)
+    if "network_map" in only:
+        made["network_map"] = N.network_map(cube, out)
+    if "thinning" in only:
+        made["thinning"] = N.thinning(cube, out)
+    if runs.empty:
+        for f in only:
+            made.setdefault(f, None)
+        return made
+    if "scores_by_density" in only:
+        made["scores_by_density"] = A.scores_by_density(runs, out)
+    if "table" in only:
+        made["table"] = A.table(runs, out)
+    for dens in ("full", "60km"):
+        if "correlation" in only:
+            made[f"correlation_{dens}"] = A.correlation_by_distance(split, dens, out, results)
+        if "spectra" in only:
+            made[f"spectra_{dens}"] = A.spectra(split, dens, out, results)
+    if "example" in only:
+        made["example"] = A.example(cube, out, root=results)
+    return made

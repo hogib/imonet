@@ -9,6 +9,7 @@ import pandas as pd
 
 from imonet.cube import CALIFORNIA, TEST, VALIDATION, Cube
 from imonet.evaluate import DENSITIES, RESULTS, THIN_SEEDS, Setup, density_name, report, run
+from imonet.figures import FIGURES
 from imonet.ngl import STEPS, read_steps
 
 SPLITS = {"validation": VALIDATION, "test": TEST}
@@ -36,10 +37,21 @@ def main(argv: list[str] | None = None) -> None:
     r = sub.add_parser("report", help="print the experiment A table")
     r.add_argument("--split", choices=list(SPLITS), default="validation")
 
+    f = sub.add_parser("figures", help="figures and tables for the report and the paper")
+    f.add_argument("--out", type=Path, default=Path("paper/figures"))
+    f.add_argument("--split", choices=list(SPLITS), default="validation")
+    f.add_argument("--only", nargs="+", choices=FIGURES, default=list(FIGURES))
+
     a = p.parse_args(argv)
     if a.cmd == "report":
         with pd.option_context("display.width", 200, "display.max_columns", 30, "display.precision", 3):
             print(report(a.split, a.results))
+        return
+    if a.cmd == "figures":
+        from imonet.figures import make_all
+        made = make_all(Cube.load(a.cube), a.out, a.results, a.split, tuple(a.only))
+        for name, path in made.items():
+            print(f"{name:24s} {path if path else 'skipped (no results yet)'}")
         return
 
     setup = Setup(Cube.load(a.cube), read_steps(a.steps))
