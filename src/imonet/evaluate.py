@@ -28,7 +28,7 @@ import pandas as pd
 
 from imonet.baselines import LENGTH_SCALES_KM, Method, make
 from imonet.cube import HELD_OUT, NORMAL, VALIDATION, Cube, pairwise_km
-from imonet.data import WINDOW_DAYS, component_scale, context, detrend, target
+from imonet.data import WINDOW_DAYS, component_scale, context, day_of_year, detrend, target
 from imonet.metrics import (correlation_by_distance, event_mask, neighbour_correlations, scoring_qc,
                             station_scale, station_scores, summarise)
 from imonet.network import K_NEIGHBOURS, thin
@@ -93,7 +93,7 @@ def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, 
         for ti, t0, _ in chunk:
             s = targets[ti]
             ctx = context(cube, scale, cube.lat[s], cube.lon[s], t0, net[net != s], ok, length, k)
-            ctxs.append(ctx | {"target": s, "t0": t0})
+            ctxs.append(ctx | {"target": s, "t0": t0, "doy0": np.float32(day_of_year(cube.days[t0]))})
             truths.append(target(cube, scale, s, t0, ok, length))   # kept from the method
         batch = {key: np.stack([np.asarray(c[key]) for c in ctxs]) for key in ctxs[0]}
         x_ok = np.stack([t["x_ok"] for t in truths])
@@ -175,13 +175,22 @@ def run_dir(method: str, split_name: str, density: float | None, seed: int, root
     return root / "A" / method / split_name / f"{density_name(density)}_s{seed}"
 
 
-def run(setup: Setup, method_name: str, split: int, split_name: str, density: float | None, seed: int,
-        n_samples: int = 32, root: Path = RESULTS) -> dict:
-    """One run of experiment A; writes its results and returns the summary."""
-    t = time.time()
-    cube = setup.cube
-    extra: dict = {}
-    length_km = None
+def method_for(setup: Setup, method_name: str, density: float | None, n_samples: int, root: Path,
+               model_dir: Path | None = None, steps: int = 32, guidance: float = 1.0) -> tuple[Method, dict]:
+    """The method to run and what to record about it."""
+    if method_name in ("diffusion", "regress"):
+        from imonet.model.methods import DiffusionMethod, RegressMethod
+        if model_dir is None:
+            raise ValueError(f"{method_name} needs a trained model (--model)")
+        m = DiffusionMethod(model_dir, n_samples, steps, guidance) if method_name == "diffusion" \
+            else RegressMethod(model_dir)
+        if not np.allclose(m.scale, setup.scale, rtol=1e-4):
+            raise ValueError("the model was trained with a different component scale")
+        extra = {"model": str(model_dir)}
+        if method_name == "diffusion":
+            extra |= {"sampler_steps": steps, "guidance": guidance}
+        return m, extra
+    length_km, extra = None, {}
     if method_name in ("idw", "idw+noise"):
         tuning = root / "A" / "idw_tuning.json"
         tuned = json.loads(tuning.read_text()) if tuning.exists() else {}
@@ -192,15 +201,26 @@ def run(setup: Setup, method_name: str, split: int, split_name: str, density: fl
             tuning.write_text(json.dumps(tuned, indent=1))
         length_km = tuned[key]["length_km"]
         extra["length_km"] = length_km
-    method = make(method_name, length_km, n_samples)
+    return make(method_name, length_km, n_samples), extra
+
+
+def run(setup: Setup, method_name: str, split: int, split_name: str, density: float | None, seed: int,
+        n_samples: int = 32, root: Path = RESULTS, model_dir: Path | None = None, label: str | None = None,
+        steps: int = 32, guidance: float = 1.0) -> dict:
+    """One run of experiment A; writes its results under `label` (default
+    the method name) and returns the summary."""
+    t = time.time()
+    cube = setup.cube
+    label = label or method_name
+    method, extra = method_for(setup, method_name, density, n_samples, root, model_dir, steps, guidance)
     net = network(cube, density, seed)
     pred = predict(method, cube, setup.scale, cube.stations(HELD_OUT), net, split, seed)
     per, pairs = score(cube, pred, setup.station_scale, setup.skip, setup.keep)
-    summary = {"method": method_name, "split": split_name, "density": density_name(density), "seed": seed,
-               "network_stations": int(len(net)), "samples": method.n_samples, **extra, **summarise(per),
+    summary = {"method": label, "kind": method_name, "split": split_name, "density": density_name(density),
+               "seed": seed, "network_stations": int(len(net)), "samples": method.n_samples, **extra, **summarise(per),
                "seconds": round(time.time() - t, 1)}
 
-    out = run_dir(method_name, split_name, density, seed, root)
+    out = run_dir(label, split_name, density, seed, root)
     out.mkdir(parents=True, exist_ok=True)
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
     per.to_csv(out / "stations.csv", index=False)

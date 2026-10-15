@@ -195,17 +195,41 @@ A conditional diffusion model with EDM training and sampling (Karras et al.
   U. The residuals are heavy-tailed because earthquake offsets are kept
   (standard deviations 9.1, 15.3 and 10.3 mm; El Mayor–Cucapah reaches about
   200 mm), so the standard deviation would be set by a few events.
-- **Neighbour encoder.** A temporal convolution stack shared by all
-  neighbours over each neighbour's series, availability mask and σ. A
-  geometry embedding is added from east/north offsets, log distance and
-  Fourier features of the offset. The output is one token per neighbour and
-  time patch.
-- **Denoiser.** A 1D U-Net over time on the noisy target. At every
-  resolution, each time patch attends to the neighbour tokens of the same
-  patch. The bottleneck adds temporal self-attention.
+- **Neighbour encoder.** For each neighbour, a convolution over its series,
+  availability and σ, then one residual block per U-Net level (with a
+  stride-2 convolution between levels), shared by all neighbours. A
+  geometry embedding (east and north offset / 100 km, log distance, sines
+  and cosines of the offsets at 10, 30, 100 and 300 km) modulates every
+  block (scale and shift). The output, normalised once per level, is a
+  feature per neighbour, channel and time step at every U-Net resolution.
+  It does not depend on the noise level, so sampling computes it once.
+- **Denoiser.** A 1D U-Net over time on the noisy target plus the sine and
+  cosine of the day of year, with channels 64, 128, 192, 256 at L, L/2, L/4,
+  L/8 and two residual blocks per level, modulated by the noise-level
+  embedding. After every residual block, and in the bottleneck, each time
+  step attends to the K neighbours at the same time step (4 heads). A
+  learned null token is always among the keys, so padding and dropped
+  conditioning are handled the same way. Temporal self-attention runs in
+  the bottleneck and the two coarsest decoder levels. 11.1 M parameters.
 - **Conditioning dropout.** All neighbours are dropped from 10% of samples,
   which allows classifier-free guidance at sampling time.
-- **Size.** 5–20 M parameters, bf16, trained on one RTX 3060 Ti (8 GB).
+- **EDM.** σ_data = 1 (the detrended, scaled targets have a standard
+  deviation of about 0.9, with tails to about 100 from earthquake offsets);
+  ln σ ~ N(−1.2, 1.2²) in training; loss weighted by (σ² + σ_data²)/(σ
+  σ_data)² and averaged over the target days with data. Sampling: Heun's
+  method on the probability-flow ODE, 32 steps from σ = 80 to 0.002 (ρ = 7),
+  deterministic given the initial noise.
+- **Training.** AdamW, learning rate 2·10⁻⁴ with 2,000 warm-up steps and
+  cosine decay, batch 64, gradient clipping at 1, bf16, EMA of the weights
+  (decay 0.999), which is the model used for sampling. Every 2,000 steps a
+  validation loss on 1,024 fixed samples (held-out stations, validation
+  days) at fixed noise levels (σ = 0.02 to 10) with fixed noise, and a
+  checkpoint; runs resume from it. Speed on the RTX 3060 Ti: 142 ms per
+  step compiled (`torch.compile`), 276 ms without, peak memory 5.7 GiB.
+  The cross-attention, one query against 17 keys at every time step and 17
+  layers, is memory-bound, which is why compiling halves the time.
+- **`regress`** is the same network called with a zero input and noise
+  level, trained with squared error on the target days with data.
 
 Sampling draws 32 samples per target and window. All randomness in the
 sampler comes from a seeded generator, so a run can be repeated exactly. The
