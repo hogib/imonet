@@ -107,25 +107,40 @@ tables. That window is the Kahramanmaraş case study instead (§6.3).
 
 ### 4.1 Samples
 
-A training sample is (target station, window, network):
+A training sample is (target station, window, network) (`imonet.data`):
 
-1. Draw a target from the normal stations and a 256-day window of training
-   days in which the target has data.
+1. Draw a target from the normal stations and a 256-day window lying
+   entirely in the training days, in which at least half of the target's
+   days are usable. Usable cells are available, not excluded, on normal
+   stations (`Cube.trainable`); every such (station, window) pair is equally
+   likely.
 2. Thin the rest of the training network to a random density (§4.2).
-3. Take the K = 16 nearest remaining stations within 300 km of the target.
-   Fewer are padded and masked.
+3. Take the K = 16 nearest remaining stations within 300 km of the target,
+   counting only stations with at least a quarter of the window usable, so
+   no slot goes to a station that is down. Fewer are padded and masked.
 4. The target's series over the window is the training target. Its missing
    days are left out of the loss.
+
+Validation samples are drawn the same way from the held-out stations on
+validation days, with the normal stations as the network; a fixed set of
+them gives the validation loss.
 
 ### 4.2 Network thinning
 
 California (median nearest neighbour 9 km) is much denser than Türkiye
-(about 60 km). To learn sparse networks from a dense one, each sample:
+(about 60 km). To learn sparse networks from a dense one, 80% of samples:
 
-- thins the network to a median nearest-neighbour distance drawn
+- thin the network to a median nearest-neighbour distance drawn
   log-uniformly from 10 to 100 km, and
-- drops any station closer to the target than a minimum distance drawn from
-  the same range.
+- drop any station closer to the target than a minimum distance drawn
+  log-uniformly from 1 to 100 km.
+
+The other 20% use the unthinned network and keep every neighbour, as
+full-density evaluation does (§6.1). Without them the model would almost
+never see a close neighbour: even the lightest thinning removes close
+pairs, yet 13% of held-out California stations have a normal station within
+5 km. (The minimum distance was first planned as 10–100 km on every sample;
+that left 1% of samples with a neighbour within 5 km. Now it is 3%.)
 
 Thinning is greedy minimum-separation ("disk") thinning: stations are
 visited in random order and kept if no kept station lies within a separation
@@ -144,8 +159,12 @@ Disk thinning matches Türkiye's median and upper tail. It has fewer close
 pairs than Türkiye (10th percentile 55 km against 29 km); the effect of this
 is checked on experiment C rather than tuned for.
 
-The second rule stops the model from copying a nearby station, and it matches
-the use case: a virtual station is placed where there is no station.
+The minimum distance stops the model from relying on a nearby station, and
+it matches the use case: a virtual station is placed where there is no
+station.
+
+Thinnings are precomputed (`ThinningBank`): 64 spacings × 4 seeds, about 9 s
+at start-up, since one thinning takes up to 0.1 s.
 
 ### 4.3 Planted transients in training
 
@@ -171,8 +190,11 @@ than recall of the training family.
 A conditional diffusion model with EDM training and sampling (Karras et al.
 2022).
 
-- **Scaling.** Each component is divided by a fixed scale from the training
-  residuals (about 2.6, 2.7 and 6.4 mm for E, N and U).
+- **Scaling.** Each component is divided by a fixed scale: the robust scale
+  (1.4826 × MAD) of the trainable cells, 2.12, 2.24 and 5.60 mm for E, N and
+  U. The residuals are heavy-tailed because earthquake offsets are kept
+  (standard deviations 9.1, 15.3 and 10.3 mm; El Mayor–Cucapah reaches about
+  200 mm), so the standard deviation would be set by a few events.
 - **Neighbour encoder.** A temporal convolution stack shared by all
   neighbours over each neighbour's series, availability mask and σ. A
   geometry embedding is added from east/north offsets, log distance and
