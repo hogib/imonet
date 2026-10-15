@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Symlink to gnssdl data (no trailing slash: a "data/" pattern would not match a symlink)
+/data
