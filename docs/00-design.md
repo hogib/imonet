@@ -326,7 +326,19 @@ Details (`imonet.baselines`):
   and is left out. Sampling conditions on every available neighbour value
   over the window with a flat prior on each neighbour's mean and trend
   (R&W eq. 2.42), i.e. on the detrended neighbours as the data present
-  them, and draws the samples jointly.
+  them, and draws the samples jointly. Lag curves are medians over stations
+  (pairs) within each window, averaged over windows (2026-10-16): fitted to
+  means, the GP described a disturbed station (mean window variance 1.5–1.7×
+  the median, slow part 5–6×) and its samples were 25% too large and 2.6×
+  too strong at 64–128 days (`gp-moments`, CRPS 0.306 at 60 km s0); fitted
+  to medians it scores CRPS 0.293 (as idw+noise), spread/error 0.99 at the
+  median station, |Δr| 0.009. The switch was prompted by that validation
+  result, so both are reported.
+- Results (60 km, s0): `krige` ≈ `idw` and `krige+noise` ≈ `idw+noise` at
+  every density, but `krige+noise` and `gp` reproduce the decrease of
+  neighbour correlation with distance as well as diffusion does; diffusion
+  leads the best Gaussian generator by ~3% in fast CRPS and 2.5% in energy
+  score.
 
 ## 6. Experiments
 

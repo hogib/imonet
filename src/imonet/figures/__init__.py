@@ -14,7 +14,7 @@ from imonet.evaluate import RESULTS
 
 DIFFUSION_MODEL = "diffusion-v1"      # the model drawn in example figures
 FIGURES = ("network_map", "thinning", "training", "scores_by_density", "calibration", "correlation", "spectra",
-           "example", "table", "variants")
+           "example", "table", "variants", "generators")
 
 
 def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "validation",
@@ -43,6 +43,8 @@ def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "valid
         made["calibration"] = A.calibration_by_noise(runs, out)
     if "variants" in only:
         made["variants"] = A.variants(split, out, results)
+    if "generators" in only:
+        made["generators"] = A.generators(split, out, results)
     for dens in ("full", "60km"):
         if "correlation" in only:
             made[f"correlation_{dens}"] = A.correlation_by_distance(split, dens, out, results)

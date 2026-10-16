@@ -37,10 +37,13 @@ def load_runs(split: str = "validation", root: Path = RESULTS) -> pd.DataFrame:
 
 
 def _ordered_methods(df: pd.DataFrame) -> list[str]:
-    """The main methods present, in their fixed order. Variants (screened,
-    guided) are compared in `variants` only."""
-    present = set(df["method"])
-    return [m for m in METHODS if m in present]
+    """The main methods with results at every density present in `df`, in
+    their fixed order: a method part-way through its grid would be averaged
+    over fewer networks than the others. Variants (screened, guided) are
+    compared in `variants`, single networks in `generators`."""
+    densities = set(df["density"])
+    done = {m for m, g in df.groupby("method") if densities <= set(g["density"])}
+    return [m for m in METHODS if m in done]
 
 
 def _x(densities) -> np.ndarray:
@@ -250,12 +253,10 @@ VARIANT_COLS = (("crps_fast", "CRPS$_f$"), ("cover90_fast", "Cov.$_{90,f}$"), ("
                 ("screened", "Scr.\\,\\%"))
 
 
-def variants(split: str, out: Path, root: Path = RESULTS, density: str = "60km", seed: int = 0,
-             name: str = "variants_table") -> Path | None:
-    """Sampling variants of the generative methods on one thinned network:
-    screened samples and classifier-free guidance weights, as a LaTeX
-    tabular. |Δr| is the mean over distance bins of the absolute error of
-    the neighbour correlation."""
+def _network_runs(split: str, root: Path, density: str, seed: int) -> list[dict]:
+    """Summaries of the generative runs on one network, with the mean
+    absolute error of the neighbour correlation (`corr_error`) and the
+    screened share in percent."""
     rows = []
     for p in sorted((root / "A").glob(f"*/{split}/{density}_s{seed}/summary.json")):
         s = json.loads(p.read_text())
@@ -265,6 +266,48 @@ def variants(split: str, out: Path, root: Path = RESULTS, density: str = "60km",
         s["corr_error"] = pd.read_csv(corr)["difference"].abs().mean() if corr.exists() else np.nan
         s["screened"] = 100 * s["screened"] if "screened" in s else np.nan
         rows.append(s)
+    return rows
+
+
+GENERATORS = ("idw+noise", "krige+noise", "gp-moments", "gp", "diffusion")
+GENERATOR_LABELS = {"gp-moments": "GP, mean fit", "gp": "GP, median fit"}
+GENERATOR_COLS = (("crps_fast", "CRPS$_f$"), ("energy_total", "Energy"), ("cover90_fast", "Cov.$_{90,f}$"),
+                  ("spread_skill", "S/E"), ("spread_skill_pooled", "S/E$_\\mathrm{pool}$"),
+                  ("scale_log2", "Scale"), ("tail_log2", "Tail"), ("psd_log10_64_128", "PSD$_{64\\text{--}128}$"),
+                  ("corr_error", "$|\\Delta r|$"))
+
+
+def generators(split: str, out: Path, root: Path = RESULTS, density: str = "60km", seed: int = 0,
+               name: str = "generators_table") -> Path | None:
+    """The generative methods side by side on one thinned network (all
+    unscreened), as a LaTeX tabular: a fair comparison while some methods
+    have not yet run on every network."""
+    runs = {s["method"]: s for s in _network_runs(split, root, density, seed)}
+    present = [m for m in GENERATORS if m in runs]
+    if not present:
+        return None
+    lines = [r"\begin{tabular}{l" + "r" * len(GENERATOR_COLS) + "}", r"\toprule",
+             "Method & " + " & ".join(h for _, h in GENERATOR_COLS) + r" \\", r"\midrule"]
+    for m in present:
+        r = runs[m]
+        vals = ["--" if not np.isfinite(r.get(c, np.nan)) else f"{r[c]:.3f}" for c, _ in GENERATOR_COLS]
+        label = GENERATOR_LABELS.get(m, method_style(m)["label"])
+        lines.append(f"{label} & " + " & ".join(vals) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{name}.tex"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def variants(split: str, out: Path, root: Path = RESULTS, density: str = "60km", seed: int = 0,
+             name: str = "variants_table") -> Path | None:
+    """Sampling variants of the generative methods on one thinned network:
+    screened samples and classifier-free guidance weights, as a LaTeX
+    tabular. |Δr| is the mean over distance bins of the absolute error of
+    the neighbour correlation."""
+    rows = [s for s in _network_runs(split, root, density, seed)
+            if s.get("kind", s["method"]) in ("diffusion", "idw+noise") and not s["method"].startswith("diffusion-v")]
     if not rows:
         return None
     df = pd.DataFrame(rows)
