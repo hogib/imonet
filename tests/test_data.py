@@ -155,3 +155,13 @@ def test_detrend_with_one_day_removes_the_mean_only():
     ok = np.array([False, True, False, False])
     out = detrend(x, ok, zero_missing=False)
     assert np.allclose(out, x - x[1])
+
+
+def test_windows_carry_the_target_noise_level():
+    from imonet.data import training_windows, component_scale
+    from imonet.metrics import station_noise_log
+    cube = synthetic_cube()
+    ds = training_windows(cube, component_scale(cube), 4, 0, length=32)
+    b = ds[0]
+    assert b["target_noise"].shape == (3,) and b["target_noise"].dtype == np.float32
+    assert b["target_noise_ok"] and np.allclose(b["target_noise"], station_noise_log(cube)[b["target"]])

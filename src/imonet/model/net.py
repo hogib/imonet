@@ -12,6 +12,15 @@ or conditioning dropped for classifier-free guidance) attends to it alone.
 Batch tensors, as `imonet.data` makes them (B batch, K neighbours, L days):
 y B×K×L×3, y_ok B×K×L, y_sigma B×K×L×3, geom B×K×3 (east, north, distance
 in km), valid B×K, doy0 B.
+
+Optionally (`NetConfig.station_noise`), the target station's own noise level
+conditions every block alongside the diffusion noise level: target_noise B×3,
+the log of its day-to-day scale per component relative to a typical station
+(`metrics.station_noise_log`), and target_noise_ok B, whether it is given.
+Without it, or where it is not given, the model hedges over the stations that
+could stand at the location; with it, the user chooses how noisy the virtual
+station is. Its embedding starts at zero, so training starts from the
+unconditioned network.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ class NetConfig:
     heads: int = 4
     emb: int = 256                     # noise-level embedding width
     dropout: float = 0.0
+    station_noise: bool = False        # optional input: the target station's own noise level
 
 
 def _groups(c: int) -> int:
@@ -174,6 +184,16 @@ def noise_embedding(c_noise: torch.Tensor, dim: int) -> torch.Tensor:
     return torch.cat([torch.sin(a), torch.cos(a)], dim=-1)
 
 
+def station_input(cond: dict, b: int, device) -> torch.Tensor:
+    """B×4: the target's log noise level (0 where not given) and whether it
+    is given; not given when the batch has no target_noise."""
+    if "target_noise" not in cond:
+        return torch.zeros(b, 4, device=device)
+    known = cond["target_noise_ok"]
+    level = torch.where(known[:, None], cond["target_noise"].float(), 0.0)
+    return torch.cat([level, known[:, None].float()], dim=1)
+
+
 class Net(nn.Module):
     """F(x_in, c_noise, cond): the raw network inside the EDM preconditioning
     (or, for `regress`, the predictor itself with x_in = 0)."""
@@ -184,6 +204,10 @@ class Net(nn.Module):
         ch, e, nb = cfg.channels, cfg.emb, cfg.blocks
         self.encoder = NeighbourEncoder(cfg)
         self.emb = nn.Sequential(nn.Linear(e, e), nn.SiLU(), nn.Linear(e, e))
+        if cfg.station_noise:
+            self.station = nn.Sequential(nn.Linear(3 + 1, e), nn.SiLU(), nn.Linear(e, e))
+            nn.init.zeros_(self.station[-1].weight)
+            nn.init.zeros_(self.station[-1].bias)
         self.inp = nn.Conv1d(3 + 2, ch[0], 3, padding=1)
         n_lev = len(ch)
         self.down_blocks, self.down_attn, self.downs = nn.ModuleList(), nn.ModuleList(), nn.ModuleList()
@@ -225,6 +249,8 @@ class Net(nn.Module):
         h = torch.cat([x_in, torch.sin(phase)[..., None], torch.cos(phase)[..., None]], dim=-1)
         h = self.inp(h.transpose(1, 2).to(x_in.dtype))
         emb = self.emb(noise_embedding(c_noise, self.cfg.emb).to(h.dtype))
+        if self.cfg.station_noise:
+            emb = emb + self.station(station_input(cond, b, x_in.device).to(emb.dtype))
 
         skips = []
         for i in range(len(self.cfg.channels)):

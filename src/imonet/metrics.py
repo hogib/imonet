@@ -100,11 +100,12 @@ def station_scale(cube: Cube) -> np.ndarray:
     return out
 
 
-def station_noise(cube: Cube) -> np.ndarray:
-    """S: each station's day-to-day noise level relative to a typical
-    station, from its training years as `station_scale`: the geometric mean
-    over E, N, U of the robust scale of the fast part, divided by the median
-    of that scale over stations. 1 is a typical station; NaN without data."""
+def station_noise_log(cube: Cube) -> np.ndarray:
+    """S×3: each station's day-to-day noise level per component relative to
+    a typical station, as a natural log, from its training years as
+    `station_scale`: the log of the robust scale of the fast part over the
+    median of that scale over stations. 0 is a typical station; NaN without
+    data. Also an optional input of the diffusion model (`imonet.model.net`)."""
     train = (cube.split_day == TRAIN)[None, :] & cube.avail & ~cube.exclude
     fast = np.full((cube.n_sta, 3), np.nan)
     for i in range(cube.n_sta):
@@ -112,8 +113,15 @@ def station_noise(cube: Cube) -> np.ndarray:
         if cells.any():
             x = np.where(cells[:, None], cube.r[i], np.nan).astype(np.float64)
             fast[i] = robust_scale(fast_part(x)[cells])
-    rel = np.log(fast / np.nanmedian(fast, axis=0))
-    return np.exp(rel.mean(axis=1))
+    return np.log(fast / np.nanmedian(fast, axis=0))
+
+
+def station_noise(cube: Cube | None = None, log: np.ndarray | None = None) -> np.ndarray:
+    """S: a station's noise level relative to a typical station, the
+    geometric mean over E, N, U of `station_noise_log` (given as `log`, or
+    computed from `cube`). 1 is a typical station."""
+    log = station_noise_log(cube) if log is None else log
+    return np.exp(log.mean(axis=1))
 
 
 def crps(samples: np.ndarray, y: np.ndarray) -> np.ndarray:

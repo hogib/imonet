@@ -28,9 +28,9 @@ import pandas as pd
 
 from imonet.baselines import LENGTH_SCALES_KM, Method, make
 from imonet.cube import HELD_OUT, NORMAL, VALIDATION, Cube, pairwise_km
-from imonet.data import WINDOW_DAYS, component_scale, context, day_of_year, detrend, target
+from imonet.data import WINDOW_DAYS, component_scale, context, day_of_year, detrend, target, target_noise
 from imonet.metrics import (correlation_by_distance, event_mask, neighbour_correlations, scoring_qc, screen,
-                            station_noise, station_scale, station_scores, summarise)
+                            station_noise, station_noise_log, station_scale, station_scores, summarise)
 from imonet.network import K_NEIGHBOURS, thin
 
 RESULTS = Path("runs")
@@ -77,7 +77,11 @@ class Prediction:
 
 
 def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, net: np.ndarray,
-            split: int, seed: int = 0, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS) -> Prediction:
+            split: int, seed: int = 0, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS,
+            noise_log: np.ndarray | None = None) -> Prediction:
+    """Every method sees the same contexts; with `noise_log` (S×3,
+    `station_noise_log`) they include the target's noise level, which only
+    a diffusion model trained with it and told to use it reads."""
     ok = cube.avail
     method.prepare(cube, scale, net, ok)
     wins = period_windows(cube, split, length)
@@ -93,7 +97,8 @@ def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, 
         for ti, t0, _ in chunk:
             s = targets[ti]
             ctx = context(cube, scale, cube.lat[s], cube.lon[s], t0, net[net != s], ok, length, k)
-            ctxs.append(ctx | {"target": s, "t0": t0, "doy0": np.float32(day_of_year(cube.days[t0]))})
+            ctx |= {"target": s, "t0": t0, "doy0": np.float32(day_of_year(cube.days[t0]))}
+            ctxs.append(ctx | (target_noise(noise_log, s) if noise_log is not None else {}))
             truths.append(target(cube, scale, s, t0, ok, length))   # kept from the method
         batch = {key: np.stack([np.asarray(c[key]) for c in ctxs]) for key in ctxs[0]}
         x_ok = np.stack([t["x_ok"] for t in truths])
@@ -167,7 +172,8 @@ class Setup:
         self.cube = cube
         self.scale = component_scale(cube)
         self.station_scale = station_scale(cube)
-        self.noise = station_noise(cube)
+        self.noise_log = station_noise_log(cube)
+        self.noise = station_noise(log=self.noise_log)
         self.skip = event_mask(cube, steps)
         self.keep, self.qc_dropped = scoring_qc(cube, steps)
 
@@ -193,19 +199,20 @@ def run_dir(method: str, split_name: str, density: float | None, seed: int, root
 
 
 def method_for(setup: Setup, method_name: str, density: float | None, n_samples: int, root: Path,
-               model_dir: Path | None = None, steps: int = 32, guidance: float = 1.0) -> tuple[Method, dict]:
+               model_dir: Path | None = None, steps: int = 32, guidance: float = 1.0,
+               target_noise: str = "unknown") -> tuple[Method, dict]:
     """The method to run and what to record about it."""
     if method_name in ("diffusion", "regress"):
         from imonet.model.methods import DiffusionMethod, RegressMethod
         if model_dir is None:
             raise ValueError(f"{method_name} needs a trained model (--model)")
-        m = DiffusionMethod(model_dir, n_samples, steps, guidance) if method_name == "diffusion" \
+        m = DiffusionMethod(model_dir, n_samples, steps, guidance, target_noise) if method_name == "diffusion" \
             else RegressMethod(model_dir)
         if not np.allclose(m.scale, setup.scale, rtol=1e-4):
             raise ValueError("the model was trained with a different component scale")
         extra = {"model": str(model_dir)}
         if method_name == "diffusion":
-            extra |= {"sampler_steps": steps, "guidance": guidance}
+            extra |= {"sampler_steps": steps, "guidance": guidance, "target_noise": target_noise}
         return m, extra
     length_km, extra = None, {}
     if method_name in ("idw", "idw+noise"):
@@ -223,16 +230,17 @@ def method_for(setup: Setup, method_name: str, density: float | None, n_samples:
 
 def run(setup: Setup, method_name: str, split: int, split_name: str, density: float | None, seed: int,
         n_samples: int = 32, root: Path = RESULTS, model_dir: Path | None = None, label: str | None = None,
-        steps: int = 32, guidance: float = 1.0, screen: bool = False) -> list[dict]:
+        steps: int = 32, guidance: float = 1.0, screen: bool = False, target_noise: str = "unknown") -> list[dict]:
     """One run of experiment A; writes its results under `label` (default
     the method name) and returns the summary. With `screen`, the same
     samples screened for outliers are also scored, as `<label>-screened`."""
     t = time.time()
     cube = setup.cube
     label = label or method_name
-    method, extra = method_for(setup, method_name, density, n_samples, root, model_dir, steps, guidance)
+    method, extra = method_for(setup, method_name, density, n_samples, root, model_dir, steps, guidance,
+                               target_noise)
     net = network(cube, density, seed)
-    pred = predict(method, cube, setup.scale, cube.stations(HELD_OUT), net, split, seed)
+    pred = predict(method, cube, setup.scale, cube.stations(HELD_OUT), net, split, seed, noise_log=setup.noise_log)
     variants = [(label, pred, {})]
     if screen and method.n_samples > 1:
         spred, share = screened(pred)

@@ -29,13 +29,14 @@ from torch.utils.data import DataLoader
 from imonet.cube import Cube
 from imonet.data import WINDOW_DAYS, component_scale, training_windows, validation_windows
 from imonet.evaluate import RESULTS
-from imonet.model.edm import EDM, EDMConfig, Regress, drop_condition, n_params
+from imonet.metrics import station_noise_log
+from imonet.model.edm import EDM, EDMConfig, Regress, drop_condition, drop_station_noise, n_params
 from imonet.model.net import Net, NetConfig
 
 MODELS = RESULTS / "models"
 VAL_SIGMAS = (0.02, 0.1, 0.3, 1.0, 3.0, 10.0)
-BOOL_KEYS = ("x_ok", "y_ok", "valid")
-FLOAT_KEYS = ("x", "y", "y_sigma", "geom", "doy0")
+BOOL_KEYS = ("x_ok", "y_ok", "valid", "target_noise_ok")
+FLOAT_KEYS = ("x", "y", "y_sigma", "geom", "doy0", "target_noise")
 
 
 @dataclass
@@ -55,6 +56,7 @@ class TrainConfig:
     seed: int = 0
     length: int = WINDOW_DAYS          # days per window
     compile: bool = True               # torch.compile on GPU: about 2× faster (memory-bound cross-attention)
+    noise_drop: float = 0.3            # share of samples whose target noise level is hidden (net.station_noise)
     net: NetConfig = field(default_factory=NetConfig)
     edm: EDMConfig = field(default_factory=EDMConfig)
 
@@ -130,8 +132,10 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
             {**asdict(cfg), "scale": scale.tolist()}, indent=1))
     log(f"{name}: {cfg.kind}, {n_params(net) / 1e6:.1f} M parameters, device {device}")
 
-    train_ds = training_windows(cube, scale, cfg.samples_per_epoch, cfg.seed, length=cfg.length)
-    val_ds = validation_windows(cube, scale, cfg.val_samples, cfg.seed + 1000, length=cfg.length)
+    noise_log = station_noise_log(cube)
+    train_ds = training_windows(cube, scale, cfg.samples_per_epoch, cfg.seed, length=cfg.length, noise_log=noise_log)
+    val_ds = validation_windows(cube, scale, cfg.val_samples, cfg.seed + 1000, length=cfg.length,
+                                noise_log=noise_log)
     val_loader = DataLoader(val_ds, batch_size=cfg.batch, num_workers=cfg.workers)
     g = torch.Generator(device=device)
     g.manual_seed(cfg.seed * 7919 + step)
@@ -158,6 +162,7 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
                 break
             b = to_torch(batch, device)
             b = drop_condition(b, cfg.edm.cond_drop, g) if cfg.kind == "diffusion" else b
+            b = drop_station_noise(b, cfg.noise_drop, g) if cfg.net.station_noise else b
             for grp in opt.param_groups:
                 grp["lr"] = lr_at(step)
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):

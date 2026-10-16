@@ -21,7 +21,7 @@ import torch
 
 from imonet.model.net import Net
 
-COND_KEYS = ("y", "y_ok", "y_sigma", "geom", "valid", "doy0")
+COND_KEYS = ("y", "y_ok", "y_sigma", "geom", "valid", "doy0", "target_noise", "target_noise_ok")
 
 
 @dataclass
@@ -43,6 +43,16 @@ def drop_condition(cond: dict, p: float, generator: torch.Generator | None = Non
     b = cond["valid"].shape[0]
     keep = torch.rand(b, device=cond["valid"].device, generator=generator) >= p
     return cond | {"valid": cond["valid"] & keep[:, None]}
+
+
+def drop_station_noise(cond: dict, p: float, generator: torch.Generator | None = None) -> dict:
+    """Mark the target's noise level unknown for a random share p of the
+    samples, so the model also learns to generate without it."""
+    if p <= 0 or "target_noise_ok" not in cond:
+        return cond
+    ok = cond["target_noise_ok"]
+    keep = torch.rand(ok.shape[0], device=ok.device, generator=generator) >= p
+    return cond | {"target_noise_ok": ok & keep}
 
 
 def unconditional(cond: dict) -> dict:

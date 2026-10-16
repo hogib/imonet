@@ -213,6 +213,24 @@ A conditional diffusion model with EDM training and sampling (Karras et al.
   the bottleneck and the two coarsest decoder levels. 11.1 M parameters.
 - **Conditioning dropout.** All neighbours are dropped from 10% of samples,
   which allows classifier-free guidance at sampling time.
+- **Optional station noise level** (`NetConfig.station_noise`, from
+  `diffusion-v2`). The target station's day-to-day noise per component,
+  log relative to a typical station (`metrics.station_noise_log`, training
+  years), and a flag saying whether it is given, pass through a small MLP
+  whose output is added to the noise-level embedding (zero-initialised,
+  about 70k parameters). It is hidden for 30% of training samples
+  (`TrainConfig.noise_drop`), so the model generates with or without it.
+  Why: the neighbours do not reveal how noisy a station is, so without it
+  the model hedges, too wide for quiet stations and too narrow for noisy
+  ones (§9). In use, the user chooses how noisy the virtual station is;
+  in evaluation (`eval --target-noise given`) the held-out station's
+  training-years level stands in for that choice, which uses information
+  about the real station and is reported apart from the blind
+  (`unknown`) mode. The fast level predicts per-station calibration far
+  better than the slow-part level (Spearman −0.43 against −0.25 with
+  log spread/error; adding the slow level raises R² from 0.27 to 0.28),
+  so only the fast level is used. For a training target, its own window
+  is part of the years its level is computed from (about 6%).
 - **EDM.** σ_data = 1 (the detrended, scaled targets have a standard
   deviation of about 0.9, with tails to about 100 from earthquake offsets);
   ln σ ~ N(−1.2, 1.2²) in training; loss weighted by (σ² + σ_data²)/(σ
@@ -469,5 +487,8 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
     spread/error 1.11–1.18 (a residual long-period excess).
   `summarise` now reports pooled calibration and calibration by noise
   quartile; `imonet rescore` recomputes summaries from stations.csv.
-- Optional conditioning on the virtual station's noise level (proposed
-  2026-10-16, §4.4 when adopted): to be decided.
+- Conditioning on the virtual station's noise level (§4.4): implemented
+  2026-10-16, `diffusion-v2` to train. Success: spread/error flat across
+  noise quartiles (±0.1) and fast 90% coverage 0.88–0.93 per quartile with
+  the level given, fast CRPS below v1's 0.285 at 60 km; with it unknown,
+  CRPS within 0.003 of v1; neighbour correlation within 0.015 either way.

@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--label", help="name of the results (default: the method)")
     e.add_argument("--sampler-steps", type=int, default=32)
     e.add_argument("--guidance", type=float, default=1.0)
+    e.add_argument("--target-noise", choices=["unknown", "given"], default="unknown",
+                   help="diffusion: withhold or pass the held-out station's training-years noise level")
     e.add_argument("--screen", action="store_true",
                    help="also score the samples screened for outliers as the cube was, as <label>-screened")
 
@@ -51,6 +53,10 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--val-every", type=int, default=TrainConfig.val_every)
     t.add_argument("--workers", type=int, default=TrainConfig.workers)
     t.add_argument("--seed", type=int, default=TrainConfig.seed)
+    t.add_argument("--station-noise", action="store_true",
+                   help="condition on the target station's noise level (optional input, see model/net.py)")
+    t.add_argument("--noise-drop", type=float, default=TrainConfig.noise_drop,
+                   help="share of training samples with the noise level hidden")
 
     rs = sub.add_parser("rescore", help="recompute run summaries from their per-station scores")
     rs.add_argument("--split", choices=list(SPLITS), default="validation")
@@ -81,8 +87,11 @@ def main(argv: list[str] | None = None) -> None:
 
     if a.cmd == "train":
         from imonet.train import train
+        from dataclasses import replace
+        from imonet.model.net import NetConfig
         cfg = TrainConfig(kind=a.kind, steps=a.steps, batch=a.batch, lr=a.lr, log_every=a.log_every, val_every=a.val_every,
-                          workers=a.workers, seed=a.seed)
+                          workers=a.workers, seed=a.seed, noise_drop=a.noise_drop,
+                          net=replace(NetConfig(), station_noise=a.station_noise))
         root = a.results / "models"
         log_path = root / a.name / "train.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +108,7 @@ def main(argv: list[str] | None = None) -> None:
     for d in map(_density, a.density):
         for seed in ([0] if d is None else range(a.seeds)):
             for s in run(setup, a.method, SPLITS[a.split], a.split, d, seed, a.samples, a.results, a.model,
-                         a.label, a.sampler_steps, a.guidance, a.screen):
+                         a.label, a.sampler_steps, a.guidance, a.screen, a.target_noise):
                 print(f"{s['method']} {s['density']} s{seed}: nrmse_fast {s.get('nrmse_fast', float('nan')):.3f} "
                       f"crps_fast {s.get('crps_fast', float('nan')):.3f} ({s['stations']} stations, "
                       f"{s['seconds']} s)", flush=True)

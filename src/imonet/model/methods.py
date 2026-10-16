@@ -23,16 +23,28 @@ SAMPLE_CHUNK = 512           # sequences per sampler call (8 GB GPU)
 class DiffusionMethod(Method):
     name = "diffusion"
 
-    def __init__(self, model_dir: Path, n_samples: int = 32, steps: int = 32, guidance: float = 1.0):
+    def __init__(self, model_dir: Path, n_samples: int = 32, steps: int = 32, guidance: float = 1.0,
+                 target_noise: str = "unknown"):
+        """target_noise: "given" passes the target station's noise level
+        (`target_noise` in the batch) to a model trained with it; "unknown"
+        withholds it."""
         kind, net, cfg, self.scale = load(model_dir)
         if kind != "diffusion":
             raise ValueError(f"{model_dir} is a {kind} model")
+        if target_noise not in ("given", "unknown"):
+            raise ValueError(f"target_noise must be given or unknown, not {target_noise}")
+        if target_noise == "given" and not cfg.net.station_noise:
+            raise ValueError(f"{model_dir} was trained without the target noise level")
+        self.target_noise = target_noise
         self.edm, self.n_samples, self.steps, self.guidance = EDM(net, cfg.edm), n_samples, steps, guidance
         self.device = next(net.parameters()).device
 
     def sample(self, batch, rng):
         b, _, length, _ = batch["y"].shape
         cond = to_torch(batch, self.device)
+        if self.target_noise == "unknown" or "target_noise" not in cond:
+            cond.pop("target_noise", None)
+            cond.pop("target_noise_ok", None)
         rep = {k: v.repeat_interleave(self.n_samples, dim=0) for k, v in cond.items()}   # B·m rows
         g = torch.Generator(device=self.device)
         g.manual_seed(int(rng.integers(2 ** 62)))

@@ -5,7 +5,8 @@ import torch
 from imonet.cube import HELD_OUT, NORMAL, VALIDATION
 from imonet.data import component_scale
 from imonet.evaluate import predict, screened
-from imonet.model.edm import EDM, EDMConfig, Regress, drop_condition
+from imonet.metrics import station_noise_log
+from imonet.model.edm import EDM, EDMConfig, Regress, drop_condition, drop_station_noise
 from imonet.model.methods import DiffusionMethod, RegressMethod
 from imonet.model.net import Net, NetConfig
 from imonet.train import TrainConfig, train
@@ -134,3 +135,54 @@ def test_train_resume_and_evaluate(tmp_path, kind):
         spred, share = screened(pred)
         assert spred.samples.shape == pred.samples.shape and 0 <= share < 0.05
         assert np.array_equal(np.isnan(spred.samples), np.isnan(pred.samples))
+
+
+NOISY = NetConfig(channels=(8, 16), blocks=1, self_attention_levels=1, heads=2, emb=16, station_noise=True)
+
+
+def with_noise(b: dict, known: bool = True) -> dict:
+    return b | {"target_noise": torch.tensor([[0.5, -0.3, 1.0]] * B), "target_noise_ok": torch.full((B,), known)}
+
+
+def test_station_noise_input():
+    torch.manual_seed(0)
+    b = batch()
+    fresh = Net(NOISY)                                       # zero-initialised: starts as the plain net
+    plain = Net(TINY)
+    plain.load_state_dict({k: v for k, v in fresh.state_dict().items() if not k.startswith("station.")})
+    x = torch.randn(B, L, 3)
+    assert torch.allclose(fresh(x, torch.zeros(B), with_noise(b)), plain(x, torch.zeros(B), b), atol=1e-6)
+
+    net = randomised(Net(NOISY))
+    given = net(x, torch.zeros(B), with_noise(b))
+    hidden = net(x, torch.zeros(B), with_noise(b, known=False))
+    absent = net(x, torch.zeros(B), b)
+    assert not torch.allclose(given, hidden, atol=1e-4)      # the level is used when given
+    assert torch.allclose(hidden, absent, atol=1e-6)         # hidden is the same as not passed
+    other = with_noise(b, known=False) | {"target_noise": torch.full((B, 3), 3.0)}
+    assert torch.allclose(net(x, torch.zeros(B), other), hidden, atol=1e-6)   # a hidden value is ignored
+
+
+def test_drop_station_noise():
+    b = with_noise(batch())
+    g = torch.Generator().manual_seed(0)
+    assert not drop_station_noise(b, 1.0, g)["target_noise_ok"].any()
+    assert drop_station_noise(b, 0.0, g)["target_noise_ok"].all()
+    assert drop_station_noise(batch(), 0.5, g).keys() == batch().keys()     # no level, nothing to drop
+
+
+def test_train_and_evaluate_with_station_noise(tmp_path):
+    cube = synthetic_cube()
+    cfg = TrainConfig(kind="diffusion", steps=2, batch=4, val_every=2, val_samples=8, samples_per_epoch=8,
+                      workers=0, length=32, net=NOISY)
+    out = train("noisy", cfg, cube, tmp_path, log=lambda _: None)
+    noise_log = station_noise_log(cube)
+    preds = {}
+    for mode in ("given", "unknown"):
+        method = DiffusionMethod(out, n_samples=2, steps=4, target_noise=mode)
+        preds[mode] = predict(method, cube, component_scale(cube), cube.stations(HELD_OUT)[:2], cube.stations(NORMAL),
+                              VALIDATION, length=32, k=6, noise_log=noise_log).samples
+        assert np.isfinite(preds[mode]).all()
+    plain = train("plain", TrainConfig(**{**cfg.__dict__, "net": TINY}), cube, tmp_path, log=lambda _: None)
+    with pytest.raises(ValueError, match="without the target noise"):
+        DiffusionMethod(plain, target_noise="given")

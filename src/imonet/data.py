@@ -26,6 +26,8 @@ A sample is a dict of numpy arrays, ready for torch's default collate:
 | `nbr` | K int64 | neighbour station index, −1 pads |
 | `target`, `t0` | int | target station index (−1 for a coordinate), first day index |
 | `doy0` | float32 | day of year of the first day |
+| `target_noise` | 3 float32 | target station's log noise level per component (`station_noise_log`), 0 if unknown |
+| `target_noise_ok` | bool | the target's noise level is known |
 | `spacing_km`, `min_km` | float32 | network spacing and minimum target distance drawn |
 """
 
@@ -35,6 +37,7 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from imonet.cube import HELD_OUT, NORMAL, TRAIN, VALIDATION, Cube, pairwise_km
+from imonet.metrics import station_noise_log
 from imonet.network import K_NEIGHBOURS, MAX_NEIGHBOUR_KM, neighbours, spacing_km, thin
 
 WINDOW_DAYS = 256
@@ -122,6 +125,13 @@ def detrend(x: np.ndarray, ok: np.ndarray, zero_missing: bool = True) -> np.ndar
     return out.astype(np.float32)
 
 
+def target_noise(noise_log: np.ndarray, s: int) -> dict[str, np.ndarray]:
+    """The `target_noise` inputs of station s (S×3 `station_noise_log`)."""
+    level = noise_log[s]
+    ok = bool(np.isfinite(level).all())
+    return {"target_noise": np.where(ok, level, 0.0).astype(np.float32), "target_noise_ok": np.bool_(ok)}
+
+
 def day_of_year(day: np.datetime64) -> float:
     year = day.astype("datetime64[Y]")
     return float((day - year.astype("datetime64[D]")).astype(int))
@@ -175,8 +185,10 @@ class Windows(Dataset):
         ok: np.ndarray, n_samples: int, seed: int, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS,
         spacing_range: tuple[float, float] = SPACING_KM, min_km: tuple[float, float] = MIN_KM,
         min_target_fraction: float = MIN_TARGET_FRACTION, bank: ThinningBank | None = None,
+        noise_log: np.ndarray | None = None,
     ):
         self.cube, self.scale, self.ok = cube, np.asarray(scale, dtype=np.float32), ok
+        self.noise_log = station_noise_log(cube) if noise_log is None else noise_log
         self.n_samples, self.seed, self.epoch = n_samples, seed, 0
         self.length, self.k, self.min_km = length, k, min_km
         self.bank = bank or ThinningBank(cube, network, np.random.default_rng((seed, 1)), spacing_range)
@@ -216,7 +228,7 @@ class Windows(Dataset):
         out |= target(c, self.scale, s, t0, self.ok, self.length)
         out |= {"target": s, "t0": t0, "doy0": np.float32(day_of_year(c.days[t0])),
                 "spacing_km": np.float32(spacing), "min_km": np.float32(min_km)}
-        return out
+        return out | target_noise(self.noise_log, s)
 
 
 def training_windows(cube: Cube, scale: np.ndarray, n_samples: int, seed: int, **kw) -> Windows:
