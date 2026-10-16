@@ -58,6 +58,13 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--noise-drop", type=float, default=TrainConfig.noise_drop,
                    help="share of training samples with the noise level hidden")
 
+    cp = sub.add_parser("compare", help="paired comparison of two methods, station by station")
+    cp.add_argument("a")
+    cp.add_argument("b")
+    cp.add_argument("--score", nargs="+", default=["crps_fast", "energy_total"])
+    cp.add_argument("--density", nargs="+", default=[density_name(d) for d in DENSITIES])
+    cp.add_argument("--split", choices=list(SPLITS), default="validation")
+
     rs = sub.add_parser("rescore", help="recompute run summaries from their per-station scores")
     rs.add_argument("--split", choices=list(SPLITS), default="validation")
 
@@ -73,6 +80,20 @@ def main(argv: list[str] | None = None) -> None:
     if a.cmd == "report":
         with pd.option_context("display.width", 200, "display.max_columns", 30, "display.precision", 3):
             print(report(a.split, a.results))
+        return
+    if a.cmd == "compare":
+        from imonet.significance import compare
+        for d in a.density:
+            for score in a.score:
+                try:
+                    r = compare(a.a, a.b, score, a.split, d, a.results)
+                except (FileNotFoundError, ValueError) as err:
+                    print(f"{d}: {err}")
+                    continue
+                print(f"{d:5s} {score:13s} {r['a']} {r['a_value']:.4f} vs {r['b']} {r['b_value']:.4f}: "
+                      f"{r['difference']:+.4f} ({100 * r['relative']:+.1f}%), 95% CI [{r['ci_low']:+.4f}, "
+                      f"{r['ci_high']:+.4f}]; {r['a']} better at {r['a_better_stations']}/{r['compared_stations']} "
+                      f"stations, sign test p = {r['sign_p']:.2g} ({r['seeds']} networks)")
         return
     if a.cmd == "rescore":
         from imonet.evaluate import rescore
