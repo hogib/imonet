@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     e = sub.add_parser("eval", help="experiment A: generate held-out stations and score them")
-    e.add_argument("method", choices=["zero", "idw", "idw+noise", "diffusion", "regress"])
+    e.add_argument("method", choices=["zero", "idw", "idw+noise", "krige", "krige+noise", "gp", "diffusion", "regress"])
     e.add_argument("--split", choices=list(SPLITS), default="validation")
     e.add_argument("--density", nargs="+", default=[density_name(d) for d in DENSITIES],
                    help="full, or median nearest-neighbour spacing in km (default: full 25 60 100)")
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--sampler-steps", type=int, default=32)
     e.add_argument("--guidance", type=float, default=1.0)
     e.add_argument("--target-noise", choices=["unknown", "given"], default="unknown",
-                   help="diffusion: withhold or pass the held-out station's training-years noise level")
+                   help="diffusion, gp: withhold or pass the held-out station's training-years noise level")
     e.add_argument("--screen", action="store_true",
                    help="also score the samples screened for outliers as the cube was, as <label>-screened")
 

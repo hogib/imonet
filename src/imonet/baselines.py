@@ -12,6 +12,10 @@ get the cube, scale and network through `prepare` before predicting.
 - `idw+noise`: `idw` plus white + flicker noise, independent per component,
   with amplitudes fitted to the neighbours' departures from their own `idw`
   predictions in the same window and network.
+- `krige`: the kriging mean of each day (`imonet.kriging`), with a covariance
+  fitted once to the training years.
+- `krige+noise`: `krige` plus noise fitted as for `idw+noise`, to the
+  neighbours' departures from their own kriging predictions.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ import numpy as np
 
 from imonet.cube import Cube
 from imonet.data import context
+from imonet.kriging import Covariance, krige
 
 LENGTH_SCALES_KM = (10.0, 25.0, 50.0, 100.0, 200.0, 500.0, math.inf)
 FIT_FREQ = (1 / 64, 0.5)    # cycles/day: band of the white + flicker fit
@@ -114,17 +119,22 @@ def synthesise(a: np.ndarray, b: np.ndarray, length: int, m: int, rng: np.random
     return x[:, :length].astype(np.float32)
 
 
-class IDWNoise(Method):
-    name = "idw+noise"
+class MeanPlusNoise(Method):
+    """A point predictor's mean plus white + flicker noise per component,
+    with amplitudes fitted to the neighbours' departures from their own
+    predictions by the same predictor, in the same window and network."""
 
-    def __init__(self, length_km: float, n_samples: int = 32):
-        self.length_km, self.n_samples = length_km, n_samples
+    def __init__(self, n_samples: int = 32):
+        self.n_samples = n_samples
+
+    def mean(self, batch: dict) -> np.ndarray:
+        raise NotImplementedError
 
     def prepare(self, cube, scale, network, ok):
         self.cube, self.scale, self.network, self.ok = cube, scale, network, ok
 
     def departures(self, batch: dict, i: int) -> tuple[np.ndarray, np.ndarray]:
-        """Each valid neighbour's departure from its own idw prediction in
+        """Each valid neighbour's departure from its own prediction in
         sample i's window: (K'×L×3, K'×L ok)."""
         t0, length = int(batch["t0"][i]), batch["y"].shape[2]
         es, oks = [], []
@@ -133,13 +143,13 @@ class IDWNoise(Method):
             net = self.network[(self.network != j) & (self.network != batch["target"][i])]
             ctx = context(self.cube, self.scale, self.cube.lat[j], self.cube.lon[j], t0, net, self.ok,
                           length, batch["y"].shape[1])
-            pred = idw_mean({k: v[None] for k, v in ctx.items()}, self.length_km)[0]
+            pred = self.mean({k: v[None] for k, v in ctx.items()})[0]
             es.append(batch["y"][i, slot] - pred)
             oks.append(batch["y_ok"][i, slot])
         return np.array(es), np.array(oks)
 
     def sample(self, batch, rng):
-        mean = idw_mean(batch, self.length_km)
+        mean = self.mean(batch)
         b, length = mean.shape[0], mean.shape[1]
         out = np.repeat(mean[:, None], self.n_samples, axis=1)
         for i in range(b):
@@ -155,11 +165,48 @@ class IDWNoise(Method):
         return out
 
 
-def make(name: str, length_km: float | None = None, n_samples: int = 32) -> Method:
+class IDWNoise(MeanPlusNoise):
+    name = "idw+noise"
+
+    def __init__(self, length_km: float, n_samples: int = 32):
+        super().__init__(n_samples)
+        self.length_km = length_km
+
+    def mean(self, batch):
+        return idw_mean(batch, self.length_km)
+
+
+class Krige(Method):
+    name = "krige"
+
+    def __init__(self, covariance: Covariance):
+        self.covariance = covariance
+
+    def sample(self, batch, rng):
+        return krige(batch, self.covariance)[0][:, None]
+
+
+class KrigeNoise(MeanPlusNoise):
+    name = "krige+noise"
+
+    def __init__(self, covariance: Covariance, n_samples: int = 32):
+        super().__init__(n_samples)
+        self.covariance = covariance
+
+    def mean(self, batch):
+        return krige(batch, self.covariance)[0]
+
+
+def make(name: str, length_km: float | None = None, n_samples: int = 32,
+         covariance: Covariance | None = None) -> Method:
     if name == "zero":
         return Zero()
     if name == "idw":
         return IDW(length_km)
     if name == "idw+noise":
         return IDWNoise(length_km, n_samples)
+    if name == "krige":
+        return Krige(covariance)
+    if name == "krige+noise":
+        return KrigeNoise(covariance, n_samples)
     raise ValueError(f"unknown method {name!r}")

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +29,7 @@ import pandas as pd
 from imonet.baselines import LENGTH_SCALES_KM, Method, make
 from imonet.cube import HELD_OUT, NORMAL, VALIDATION, Cube, pairwise_km
 from imonet.data import WINDOW_DAYS, component_scale, context, day_of_year, detrend, target, target_noise
+from imonet.kriging import Covariance, empirical_covariance, fit_covariance
 from imonet.metrics import (correlation_by_distance, event_mask, neighbour_correlations, scoring_qc, screen,
                             station_noise, station_noise_log, station_scale, station_scores, summarise)
 from imonet.network import K_NEIGHBOURS, thin
@@ -225,7 +226,44 @@ def method_for(setup: Setup, method_name: str, density: float | None, n_samples:
             tuning.write_text(json.dumps(tuned, indent=1))
         length_km = tuned[key]["length_km"]
         extra["length_km"] = length_km
-    return make(method_name, length_km, n_samples), extra
+    if method_name == "gp":
+        from imonet.gp import GP
+        model = space_time_model(setup, root)
+        return GP(model, n_samples, target_noise), {"model": asdict(model), "target_noise": target_noise}
+    covariance = None
+    if method_name in ("krige", "krige+noise"):
+        covariance = kriging_covariance(setup, root)
+        extra["covariance"] = asdict(covariance)
+    return make(method_name, length_km, n_samples, covariance), extra
+
+
+def space_time_model(setup: Setup, root: Path = RESULTS):
+    """The space–time GP (`imonet.gp`), fitted once to the training years of
+    the normal stations and kept in runs/A/gp_model.json (with the lag
+    curves it was fitted to)."""
+    from imonet.gp import SpaceTime, empirical_lag_curves, fit_space_time
+    path = root / "A" / "gp_model.json"
+    if path.exists():
+        return SpaceTime.load(path)
+    curves = empirical_lag_curves(setup.cube, setup.scale)
+    model = fit_space_time(curves, kriging_covariance(setup, root))
+    model.save(path)
+    (root / "A" / "gp_lag_curves.json").write_text(json.dumps(curves, indent=1))
+    return model
+
+
+def kriging_covariance(setup: Setup, root: Path = RESULTS) -> Covariance:
+    """The kriging covariance, fitted once to the training years of the
+    normal stations and kept in runs/A/krige_covariance.json (with the
+    empirical covariances it was fitted to)."""
+    path = root / "A" / "krige_covariance.json"
+    if path.exists():
+        return Covariance.load(path)
+    emp = empirical_covariance(setup.cube, setup.scale)
+    cov = fit_covariance(emp)
+    cov.save(path)
+    (root / "A" / "krige_empirical.json").write_text(json.dumps(emp, indent=1))
+    return cov
 
 
 def run(setup: Setup, method_name: str, split: int, split_name: str, density: float | None, seed: int,

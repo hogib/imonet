@@ -266,9 +266,22 @@ All written in this repository:
 | `idw` | distance-weighted mean of the neighbours (as gnssdl's M1) |
 | `idw+noise` | `idw` plus white + flicker noise, with amplitudes fitted to the neighbours' departures from their own `idw` predictions |
 | `regress` | the same network as the diffusion model, trained with mean squared error (one output, no noise) |
+| `krige` | the kriging mean of each day, with a covariance fitted to the training years |
+| `krige+noise` | `krige` plus white + flicker noise fitted as for `idw+noise` |
+| `gp` | a space–time Gaussian process over the whole window, sampled jointly given the neighbours |
 
-`idw+noise` is the simplest generative model to beat. `regress` shows what
-diffusion adds beyond its own conditional mean.
+`idw+noise` is the simplest generative model to beat; `gp` the strongest
+Gaussian one, and the one that can reproduce correlation falling with
+distance. `regress` shows what diffusion adds beyond its own conditional
+mean. Sources read for `krige` and `gp` (added 2026-10-16): Rasmussen and
+Williams (2006) for GP regression, kriging as a GP with an unknown mean
+(eq. 2.42), Matérn kernels and fitting; Gneiting (2002) for space–time
+covariances; Langbein (2008) for Gauss–Markov noise in GNSS series. Tian
+and Shen (2016) weight neighbours by the correlation of their past
+residuals with the target's, which a virtual station has none of; Shen et
+al. (2015) and Sandwell and Wessel (2016) interpolate velocity fields
+without uncertainty; Qiu et al. (2024) fill gaps from a station's own data.
+None is reimplemented.
 
 Details (`imonet.baselines`):
 
@@ -282,6 +295,38 @@ Details (`imonet.baselines`):
   (least squares over 1/64–0.5 cycles/day, A, B ≥ 0), takes the median A
   and B over the neighbours, and adds noise with that spectrum, made on
   twice the window length and cut so it does not wrap around.
+- `krige` (`imonet.kriging`): per component, C(d) = s_cm + s_r·M(d/ℓ) +
+  s_n·[same station], M the Matérn 3/2 correlation, fitted once to the
+  training years of the normal stations (all densities share it): mean
+  pair covariance by distance class and mean station variance over 256-day
+  windows detrended as the inputs, station-windows with a listed step over
+  one robust scale left out; weighted least squares (pairs / C²),
+  ℓ by grid search. Fit (2026-10-16): almost all the shared covariance is
+  network-wide (flat from 25 to 300 km; s_cm 0.26/0.14/0.18 of station
+  variances 0.65/0.41/0.80 for E/N/U), with a small regional part within
+  about 20 km. Each day is predicted from the neighbours with data that
+  day (R&W eqs. 2.25–2.26); the common-mode term acts as the unknown mean
+  with a fitted prior, so kriging shrinks towards zero by about 8% with
+  16 neighbours.
+- `krige+noise`: as `idw+noise`, with `krige` as the predictor whose
+  neighbour departures set the noise.
+- `gp` (`imonet.gp`): per component, three independent parts, each
+  separable in space and time: common mode (spatially constant), regional
+  (Matérn 3/2, ℓ from `krige`), and the station's own (scaled by λ², λ
+  its `station_noise` level; 1 for the target unless `--target-noise
+  given`). Each part's temporal covariance is white + flicker + a
+  Gauss–Markov term exp(−u/τ); white + flicker alone left the station
+  part 0.07 short at lags of 6–16 days. Fitted to lag curves (0–128 days)
+  of the training years: pairs 100–300 km apart (common mode), pairs
+  within 10 km minus those (regional), each station with itself minus both
+  (station part); the model's curves are computed exactly for a detrended
+  window; amplitudes by non-negative least squares, τ by grid search;
+  worst misfit 0.011–0.028 against variances of 0.41–0.80. Space–time
+  interaction (Gneiting's β) would act only on the small regional part
+  and is left out. Sampling conditions on every available neighbour value
+  over the window with a flat prior on each neighbour's mean and trend
+  (R&W eq. 2.42), i.e. on the detrended neighbours as the data present
+  them, and draws the samples jointly.
 
 ## 6. Experiments
 

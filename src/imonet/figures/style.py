@@ -1,9 +1,10 @@
 """Shared look of every figure: print figures for the report and the paper.
 
 Colour follows the method, never its rank: each method has one fixed colour
-and marker in every figure. Slots are the first four of the reference
-categorical palette, validated together (adjacent CVD ΔE ≥ 9.1, normal-vision
-ΔE ≥ 22.9). Aqua and yellow are under 3:1 contrast on white, so every line
+and marker in every figure. Slots are the first seven of the reference
+categorical palette in its order, validated together (adjacent CVD ΔE ≥ 9.1,
+normal-vision ΔE ≥ 19.6). Aqua, yellow and magenta are under 3:1 contrast on
+white, so every line
 also has its own marker and a legend entry, and the numbers are also given
 as tables; colour never carries identity alone.
 `zero` is a reference, drawn in muted grey and dashed.
@@ -26,6 +27,7 @@ BASELINE = "#c3c2b7"
 SURFACE = "#ffffff"
 
 BLUE, ORANGE, AQUA, YELLOW = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
+MAGENTA, GREEN, VIOLET = "#e87ba4", "#008300", "#6250d6"
 BLUE_LIGHT = "#b7d3f6"
 # Ordinal blue ramp for the evaluation densities, dense → sparse as light →
 # dark (steps 250, 400, 550, 700; the lightest still clears 2:1 on white).
@@ -37,6 +39,9 @@ METHODS = {   # name: (label, colour, marker, linestyle)
     "idw+noise": ("idw + noise", ORANGE, "s", "-"),
     "diffusion": ("diffusion", AQUA, "D", "-"),
     "regress": ("regress", YELLOW, "^", "-"),
+    "krige": ("krige", MAGENTA, "v", "-"),
+    "krige+noise": ("krige + noise", GREEN, "P", "-"),
+    "gp": ("space–time GP", VIOLET, "X", "-"),
 }
 COMPONENTS = ("East", "North", "Up")
 
