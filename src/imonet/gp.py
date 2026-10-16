@@ -19,7 +19,15 @@ of separable valid covariances is valid; space–time interaction (Gneiting
 2002, β > 0) would act only on the regional part, which is small in
 California (`imonet.kriging`), and is left out.
 
-Fit (`fit_space_time`): ℓ comes from the kriging fit. The temporal spectra
+Fit (`fit_space_time`): ℓ comes from the kriging fit. The lag curves are
+typical values: in each window the median over stations (or station pairs),
+then the mean over windows. GNSS residuals are heavy-tailed, and a mean over
+station-windows describes a disturbed station rather than a typical one: in
+the training years the mean window variance is 1.5–1.7 times the median,
+and that of the slow part 5–6 times. A first fit to means gave samples 25%
+too large at short periods and 2.6 times too strong at 64–128 days
+(`gp-moments` in the results); the median fit is also the one consistent
+with λ, which is relative to the median station. The temporal spectra
 (A, B, G for white, flicker and Gauss–Markov; τ by grid search) are fitted
 to lag curves of the training years, measured on 256-day windows
 detrended as everywhere else: the cross-covariance of station pairs 100–300
@@ -129,12 +137,15 @@ def detrended_lag_curve(acf: np.ndarray, lags=LAGS) -> np.ndarray:
 
 
 def empirical_lag_curves(cube: Cube, scale: np.ndarray, length: int = WINDOW_DAYS, stride: int | None = None,
-                         lags=LAGS, near_km: float = NEAR_KM, far_km=FAR_KM) -> dict:
+                         lags=LAGS, near_km: float = NEAR_KM, far_km=FAR_KM, statistic: str = "median") -> dict:
     """Mean covariance at each lag, per component, over training-year windows
     of the normal stations: each station with itself ("auto"), pairs within
     near_km ("near", with their mean distance) and pairs far_km apart
-    ("far"). Station-windows with a listed step over one robust scale are
-    left out, as for the kriging fit."""
+    ("far"). Within a window, stations (or pairs) are combined by their
+    median (`statistic`, the default) or mean; windows by the mean.
+    Station-windows with a listed step over one robust scale are left out,
+    as for the kriging fit."""
+    combine = np.nanmedian if statistic == "median" else np.nanmean
     stride = stride or length // 2
     lags = [u for u in lags if u < length]
     ok_all = cube.trainable()
@@ -168,15 +179,12 @@ def empirical_lag_curves(cube: Cube, scale: np.ndarray, length: int = WINDOW_DAY
                 cov = np.where(have, prod / np.maximum(n, 1), np.nan)
                 sym = 0.5 * (cov + cov.T)                                # lag +u and −u
                 diag = np.diag(cov)
-                sums["auto"][li, c] += np.nansum(diag)
-                for key, sel in (("near", near), ("far", far)):
-                    v = sym[iu][sel]
-                    sums[key][li, c] += np.nansum(v)
-            counts["auto"][li] += np.isfinite(np.diag(np.where(have, 1.0, np.nan))).sum()
-            hv = have[iu] & have.T[iu]
-            counts["near"][li] += (hv & near).sum()
-            counts["far"][li] += (hv & far).sum()
-    out = {"lags": list(lags), "near_km": float(np.mean(near_d)) if near_d else near_km}
+                for key, v in (("auto", diag), ("near", sym[iu][near]), ("far", sym[iu][far])):
+                    if np.isfinite(v).any():
+                        sums[key][li, c] += combine(v)
+                        if c == 0:
+                            counts[key][li] += 1                           # windows contributing
+    out = {"lags": list(lags), "near_km": float(np.mean(near_d)) if near_d else near_km, "statistic": statistic}
     for k in sums:
         out[k] = (sums[k] / np.maximum(counts[k], 1)[:, None]).tolist()
         out[f"{k}_n"] = counts[k].tolist()
