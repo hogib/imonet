@@ -186,3 +186,18 @@ def test_train_and_evaluate_with_station_noise(tmp_path):
     plain = train("plain", TrainConfig(**{**cfg.__dict__, "net": TINY}), cube, tmp_path, log=lambda _: None)
     with pytest.raises(ValueError, match="without the target noise"):
         DiffusionMethod(plain, target_noise="given")
+
+
+def test_item_seeds_pair_samples_across_batches(tmp_path):
+    """With item seeds, an item's samples do not depend on what else is in
+    the batch (experiment B pairs planted and original runs this way)."""
+    cube = synthetic_cube()
+    cfg = TrainConfig(kind="diffusion", steps=2, batch=4, val_every=2, val_samples=8, samples_per_epoch=8,
+                      workers=0, length=32, net=TINY)
+    method = DiffusionMethod(train("tiny", cfg, cube, tmp_path, log=lambda _: None), n_samples=2, steps=4)
+    b = {k: v.numpy() for k, v in batch().items() if k != "x" and k != "x_ok"}
+    b["y"], b["y_ok"] = b["y"][:, :, :32], b["y_ok"][:, :, :32]
+    b["y_sigma"] = b["y_sigma"][:, :, :32]
+    full = method.sample(b | {"item_seed": np.array([7, 8, 9])}, np.random.default_rng(0))
+    one = method.sample({k: v[1:2] for k, v in b.items()} | {"item_seed": np.array([8])}, np.random.default_rng(1))
+    assert np.allclose(full[1], one[0], atol=1e-4)

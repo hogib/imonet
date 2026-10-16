@@ -58,6 +58,18 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--noise-drop", type=float, default=TrainConfig.noise_drop,
                    help="share of training samples with the noise level hidden")
 
+    b = sub.add_parser("eval-b", help="experiment B: planted fault-slip events")
+    b.add_argument("method", choices=["zero", "idw", "idw+noise", "krige", "krige+noise", "gp", "diffusion", "regress"])
+    b.add_argument("--split", choices=list(SPLITS), default="validation")
+    b.add_argument("--density", nargs="+", default=[density_name(d) for d in DENSITIES])
+    b.add_argument("--seeds", type=int, default=2, help="thinning seeds per thinned density")
+    b.add_argument("--samples", type=int, default=16)
+    b.add_argument("--model", type=Path)
+    b.add_argument("--label")
+    b.add_argument("--target-noise", choices=["unknown", "given"], default="unknown")
+    b.add_argument("--per-template", type=int, default=30, help="events per template")
+    b.add_argument("--ridgecrest", action="store_true", help="the real 2019 Ridgecrest events instead")
+
     cp = sub.add_parser("compare", help="paired comparison of two methods, station by station")
     cp.add_argument("a")
     cp.add_argument("b")
@@ -80,6 +92,25 @@ def main(argv: list[str] | None = None) -> None:
     if a.cmd == "report":
         with pd.option_context("display.width", 200, "display.max_columns", 30, "display.precision", 3):
             print(report(a.split, a.results))
+        return
+    if a.cmd == "eval-b":
+        from imonet import experiment_b as B
+        setup = Setup(Cube.load(a.cube), read_steps(a.steps_file))
+        say = lambda line: print(line, flush=True)
+        events = None if a.ridgecrest else B.load_or_plan(setup.cube, setup, SPLITS[a.split], a.split,
+                                                          a.per_template, a.results, say)
+        for d in map(_density, a.density):
+            for seed in ([0] if d is None else range(a.seeds)):
+                if a.ridgecrest:
+                    df = B.ridgecrest(setup, a.method, d, seed, a.samples, a.results, a.model, a.label, a.target_noise)
+                    say(f"ridgecrest {density_name(d)} s{seed}: {len(df)} targets, recovered "
+                        f"{df.recovered_h.median():.2f} (median), 90% inside {df.inside90_h.mean():.2f}")
+                    continue
+                df = B.run(setup, a.method, SPLITS[a.split], a.split, d, seed, events, a.samples, a.results,
+                           a.model, a.label, a.target_noise, progress=say)
+                seen = df[df.role == "seen"] if len(df) else df
+                say(f"{a.label or a.method} {density_name(d)} s{seed}: rho {seen.rho.median():.3f} (median of "
+                    f"{len(seen)} target-events)")
         return
     if a.cmd == "compare":
         from imonet.significance import compare

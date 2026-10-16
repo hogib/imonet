@@ -48,12 +48,20 @@ class DiffusionMethod(Method):
         rep = {k: v.repeat_interleave(self.n_samples, dim=0) for k, v in cond.items()}   # B·m rows
         g = torch.Generator(device=self.device)
         g.manual_seed(int(rng.integers(2 ** 62)))
+        noise = None
+        if "item_seed" in batch:
+            # Each item's initial noise from its own seed, whatever the batch
+            # holds: paired runs (experiment B) get identical noise per item.
+            noise = torch.cat([torch.randn((self.n_samples, length, 3),
+                                           generator=torch.Generator().manual_seed(int(seed)))
+                               for seed in batch["item_seed"]]).to(self.device)
         chunk = SAMPLE_CHUNK if self.guidance == 1.0 else SAMPLE_CHUNK // 2   # guidance runs the net twice
         out = []
         for a in range(0, b * self.n_samples, chunk):
             part = {k: v[a:a + chunk] for k, v in rep.items()}
             with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
-                out.append(self.edm.sample(part, length, g, self.steps, self.guidance).float())
+                part_noise = None if noise is None else noise[a:a + chunk]
+                out.append(self.edm.sample(part, length, g, self.steps, self.guidance, part_noise).float())
         x = torch.cat(out).reshape(b, self.n_samples, length, 3)
         return x.cpu().numpy()
 

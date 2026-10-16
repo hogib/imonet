@@ -97,10 +97,12 @@ class EDM:
         return torch.cat([s, torch.zeros(1, device=device, dtype=torch.float64)]).float()
 
     @torch.no_grad()
-    def sample(self, cond: dict, length: int, generator: torch.Generator, steps: int = 32,
-               guidance: float = 1.0) -> torch.Tensor:
+    def sample(self, cond: dict, length: int, generator: torch.Generator | None, steps: int = 32,
+               guidance: float = 1.0, noise: torch.Tensor | None = None) -> torch.Tensor:
         """One sample per row of `cond`: B×L×3. guidance w > 1 uses
-        D = D_uncond + w (D_cond − D_uncond)."""
+        D = D_uncond + w (D_cond − D_uncond). The sampler is deterministic
+        given its initial noise: unit Gaussian `noise` (B×L×3) if given,
+        else drawn from `generator`."""
         b = cond["valid"].shape[0]
         device = cond["valid"].device
         feats = self.net.encode(cond)
@@ -117,7 +119,9 @@ class EDM:
             return out
 
         sig = self.schedule(steps, device)
-        x = torch.randn((b, length, 3), device=device, generator=generator) * sig[0]
+        if noise is None:
+            noise = torch.randn((b, length, 3), device=device, generator=generator)
+        x = noise.to(device) * sig[0]
         for i in range(steps):
             s0, s1 = sig[i], sig[i + 1]
             dx = (x - d(x, s0)) / s0

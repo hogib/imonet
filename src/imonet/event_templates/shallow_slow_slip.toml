@@ -1,0 +1,33 @@
+# Shallow slow slip (creep event) on a strike-slip fault, propagating along strike.
+#
+# Sources (values checked against the full texts, page numbers in brackets):
+# - Materna et al. (2024), GRL 51, e2023GL108089, doi:10.1029/2023GL108089
+#   2023 Superstition Hills fault (SHF) event: ~25 km fault, 20-km bilateral
+#   rupture [2]; typical slip 20 mm, max 40 mm (creepmeter) / 47.6 mm (InSAR)
+#   [2-4, Fig. 3]; slip from near the surface to ~2 km, 2-3 km in earlier SHF
+#   events [3-4]; propagation 6.6-8.9 km/day [2]; at one point slip is
+#   pulse-like and halting, 8 sub-events over ~8 days at the creepmeter [2].
+#   2023 Imperial fault event: ~8 km propagation at 0.4 km/day, ~8 mm [2].
+# - Vavra et al. (2024), GRL 51, e2023GL107244, doi:10.1029/2023GL107244
+#   45+ mm maximum surface slip, slip confined to the shallowest ~4 km
+#   [5, conclusions]; >20 mm within 24 h of the slip front arriving [4];
+#   earlier SHF events of ~20-30 mm (1993-96, 2006) [2].
+#
+# Simplifications: uniform slip with tapered edges (the SHF events had about
+# twice the slip on the southern section [Vavra 6]); no delayed triggered
+# slip (Materna [2]: a few mm 1-2 months later); placed on any steep
+# strike-slip CFM fault, not only the Imperial Valley faults where such
+# events are documented.
+
+name = "shallow slow slip"
+slip_senses = ["rlss", "llss"]
+min_dip = 70.0
+length_km = [8.0, 25.0]
+top_km = 0.0
+bottom_km = [2.0, 4.0]
+slip_m = [0.008, 0.045]
+time = "propagating"
+duration_days = 0          # set by the propagation: length / speed + rise time
+speed_km_day = [0.4, 9.0]
+rise_days = [1.0, 8.0]
+reference = "Materna et al. 2024 (doi:10.1029/2023GL108089); Vavra et al. 2024 (doi:10.1029/2023GL107244)"

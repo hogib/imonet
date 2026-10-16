@@ -1,0 +1,32 @@
+# Afterslip: slow slip on and around a fault in the months after a large
+# earthquake, decaying logarithmically.
+#
+# Source (values checked against the full text, page numbers in brackets):
+# - Gonzalez-Ortega et al. (2014), JGR Solid Earth 119, 1482-1497,
+#   doi:10.1002/2013JB010193, the 2010 Mw 7.2 El Mayor-Cucapah earthquake:
+#   ~10-40 cm of afterslip in the first 5 months, on the periphery of the
+#   coseismic slip patches [13, Fig. 6b]; near the surface and at depth
+#   [13], ~20 cm of shallow (2-5 km) afterslip [10]; seismogenic zone to
+#   ~10 km [2]; rupture segments 7.6-28.8 km long dipping 59-89°, oblique
+#   right-lateral [9 Table 2, 10]; near-field GPS decay over 750 days:
+#   logarithmic tau = 20 +/- 3 days (better fit), exponential 66 +/- 9 days
+#   [4, Fig. 2]; cited for comparison: Hector Mine 1999 logarithmic
+#   tau = 26 +/- 8 days, Landers 1992 exponential 84 +/- 23 days [4].
+#
+# Simplifications: only the afterslip is planted, not the earthquake's
+# coseismic offset; one smooth patch instead of the uneven afterslip and the
+# fault-zone contraction of the paper [10]; the log decay is followed for
+# 365 days (about 80% of its 750-day value for tau = 20 days) and held
+# afterwards.
+
+name = "afterslip"
+slip_senses = ["rlss", "llss", "orln", "orlr", "olln", "ollr"]
+min_dip = 55.0
+length_km = [15.0, 50.0]
+top_km = [0.0, 2.0]
+bottom_km = [5.0, 12.0]
+slip_m = [0.10, 0.40]
+time = "log"
+tau_days = [17.0, 34.0]
+duration_days = 365
+reference = "Gonzalez-Ortega et al. 2014 (doi:10.1002/2013JB010193)"

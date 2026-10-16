@@ -1,16 +1,20 @@
 [project]
 name = "imonet"
 version = "0.1.0"
-description = "Add your description here"
+description = "Virtual GNSS stations generated with a conditional diffusion model"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Oguzb", email = "hoguzbolat@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "cutde>=26.3.6",
     "matplotlib>=3.9",
     "numpy>=2.0",
     "pandas>=2.2",
+    "pyproj>=3.8.0",
     "torch>=2.14.1",
 ]
 
