@@ -1,0 +1,12 @@
+The text and figures in this directory (paper.tex, report.tex, figures/ and
+the documents built from them) are
+
+Copyright (c) 2026 H. Oğuz Bolat and İsmail Haydar İmamoğlu
+
+and licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0). To view a copy of this license, visit
+https://creativecommons.org/licenses/by/4.0/ (full legal code:
+https://creativecommons.org/licenses/by/4.0/legalcode).
+
+The code that produces the figures and tables is under the MIT License (see
+../LICENSE).
