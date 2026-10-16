@@ -103,8 +103,10 @@ def main(argv: list[str] | None = None) -> None:
             for seed in ([0] if d is None else range(a.seeds)):
                 if a.ridgecrest:
                     df = B.ridgecrest(setup, a.method, d, seed, a.samples, a.results, a.model, a.label, a.target_noise)
-                    say(f"ridgecrest {density_name(d)} s{seed}: {len(df)} targets, recovered "
-                        f"{df.recovered_h.median():.2f} (median), 90% inside {df.inside90_h.mean():.2f}")
+                    big = df[df.observed_h_mm >= 5.0]
+                    say(f"ridgecrest {density_name(d)} s{seed}: {len(df)} targets within 300 km, {len(big)} with "
+                        f"offsets >= 5 mm: recovered {big.recovered_h.median():.2f} (median), error "
+                        f"{big.error_h_mm.median():.1f} mm, 90% inside {big.inside90_h.mean():.2f}")
                     continue
                 df = B.run(setup, a.method, SPLITS[a.split], a.split, d, seed, events, a.samples, a.results,
                            a.model, a.label, a.target_noise, progress=say)

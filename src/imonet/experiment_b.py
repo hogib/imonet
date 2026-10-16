@@ -386,13 +386,18 @@ def offset(x: np.ndarray, ok: np.ndarray, centre: int) -> np.ndarray:
 
 def ridgecrest(setup: Setup, method_name: str, density: float | None, seed: int, n_samples: int = 16,
                root: Path = RESULTS, model_dir: Path | None = None, label: str | None = None,
-               target_noise_mode: str = "unknown", min_mm: float = 1.0) -> pd.DataFrame:
-    """Held-out stations across the Ridgecrest earthquakes, generated from the
-    real network over a 256-day window centred on them: the coseismic offset
-    of the samples against the observed one. The window lies in the training
-    years, but the held-out stations never entered training and the
-    stations near the rupture were excluded from it in the second half of
-    2019."""
+               target_noise_mode: str = "unknown", max_km: float = 300.0) -> pd.DataFrame:
+    """Held-out stations within `max_km` of the Ridgecrest earthquakes,
+    generated from the real network over a 256-day window centred on them:
+    the coseismic offset of the samples against the one observed in the
+    station's own data (mean of OFFSET_SPAN days after minus before). The
+    window lies in the training years, but the held-out stations never
+    entered training and the stations near the rupture were excluded from
+    it in the second half of 2019. Stations are chosen by distance, not by
+    the cube's listed offsets: those are missing for exactly the stations
+    near the rupture (their window was excluded when the cube was built)
+    and unreliable far from it. Summaries are given for observed horizontal
+    offsets of at least 1 and 5 mm."""
     cube, length = setup.cube, WINDOW_DAYS
     t = int(np.flatnonzero(cube.days == RIDGECREST_DAY)[0])
     t0, centre = t - length // 2, length // 2
@@ -401,7 +406,8 @@ def ridgecrest(setup: Setup, method_name: str, density: float | None, seed: int,
     np.add.at(listed, cube.qstep_sta[near], cube.qstep_amp[near])
     targets = cube.stations(HELD_OUT)
     ok_win = cube.avail[:, t0:t0 + length]
-    usable = [s for s in targets if setup.keep[s] and np.hypot(*listed[s, :2]) >= min_mm
+    e_all, n_all = offsets_km(RIDGECREST_LONLAT[1], RIDGECREST_LONLAT[0], cube.lat, cube.lon)
+    usable = [s for s in targets if setup.keep[s] and np.hypot(e_all[s], n_all[s]) <= max_km
               and ok_win[s, centre - OFFSET_GAP - OFFSET_SPAN:centre - OFFSET_GAP].sum() >= 5
               and ok_win[s, centre + OFFSET_GAP:centre + OFFSET_GAP + OFFSET_SPAN].sum() >= 5]
     method, extra = method_for(setup, method_name, density, n_samples, root, model_dir, target_noise=target_noise_mode)
@@ -431,11 +437,14 @@ def ridgecrest(setup: Setup, method_name: str, density: float | None, seed: int,
     out = root / "B" / (label or method_name) / "ridgecrest" / f"{density_name(density)}_s{seed}"
     out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / "targets.csv", index=False)
-    big = df[df.observed_h_mm >= 5.0]
     summary = {"method": label or method_name, "density": density_name(density), "seed": seed, "targets": len(df),
-               "recovered_h_median": float(df.recovered_h.median()) if len(df) else None,
-               "recovered_h_median_5mm": float(big.recovered_h.median()) if len(big) else None,
-               "error_h_mm_median": float(df.error_h_mm.median()) if len(df) else None,
-               "inside90_h": float(df.inside90_h.mean()) if len(df) else None, **extra}
+               **extra}
+    for mm in (1.0, 5.0):
+        sub = df[df.observed_h_mm >= mm] if len(df) else df
+        tag = f"{mm:g}mm"
+        summary |= {f"targets_{tag}": int(len(sub)),
+                    f"recovered_h_median_{tag}": float(sub.recovered_h.median()) if len(sub) else None,
+                    f"error_h_mm_median_{tag}": float(sub.error_h_mm.median()) if len(sub) else None,
+                    f"inside90_h_{tag}": float(sub.inside90_h.mean()) if len(sub) else None}
     (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
     return df
