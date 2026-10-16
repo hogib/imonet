@@ -36,9 +36,10 @@ class DiffusionMethod(Method):
         rep = {k: v.repeat_interleave(self.n_samples, dim=0) for k, v in cond.items()}   # B·m rows
         g = torch.Generator(device=self.device)
         g.manual_seed(int(rng.integers(2 ** 62)))
+        chunk = SAMPLE_CHUNK if self.guidance == 1.0 else SAMPLE_CHUNK // 2   # guidance runs the net twice
         out = []
-        for a in range(0, b * self.n_samples, SAMPLE_CHUNK):
-            part = {k: v[a:a + SAMPLE_CHUNK] for k, v in rep.items()}
+        for a in range(0, b * self.n_samples, chunk):
+            part = {k: v[a:a + chunk] for k, v in rep.items()}
             with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
                 out.append(self.edm.sample(part, length, g, self.steps, self.guidance).float())
         x = torch.cat(out).reshape(b, self.n_samples, length, 3)

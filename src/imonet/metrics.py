@@ -39,6 +39,14 @@ QC_SCATTER_RATIO = 3.0
 QC_JUMP_MM = (50.0, 50.0, 100.0)
 QC_JUMP_STEP_TOLERANCE_DAYS = 45
 
+# Outlier screening of the cube (gnssdl dataset.screen_outliers), applied
+# to generated series so that they are screened as the real ones were.
+SCREEN_DAYS = 61
+SCREEN_K = 5.0
+SCREEN_MIN_DAYS = 15
+TAIL_QUANTILE = 0.99
+NOISE_GROUPS = 4             # calibration by station noise level, in quartiles
+
 
 # ---------------------------------------------------------------------------
 # Building blocks
@@ -54,6 +62,24 @@ def slow_part(x: np.ndarray) -> np.ndarray:
 
 def fast_part(x: np.ndarray) -> np.ndarray:
     return x - slow_part(x)
+
+
+def screen(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The cube's outlier screen on daily series (axis 0, NaN where
+    missing; further axes independent): a value more than SCREEN_K robust σ
+    from its 61-day running median is an outlier, with σ from a running
+    median of absolute deviations. The cube removed such days from the
+    record; a generated series instead gets its running median there, so
+    that every sample still has a value on every day. Returns (screened x,
+    outlier mask)."""
+    flat = pd.DataFrame(x.reshape(len(x), -1))
+    roll = dict(window=SCREEN_DAYS, center=True, min_periods=SCREEN_MIN_DAYS)
+    med = flat.rolling(**roll).median()
+    dev = (flat - med).abs()
+    mad = dev.rolling(**roll).median()
+    bad = (dev > SCREEN_K * 1.4826 * mad).to_numpy()
+    out = np.where(bad, med.to_numpy(), flat.to_numpy())
+    return out.reshape(x.shape), bad.reshape(x.shape)
 
 
 def robust_scale(x: np.ndarray, axis=0) -> np.ndarray:
@@ -72,6 +98,22 @@ def station_scale(cube: Cube) -> np.ndarray:
         if cells.any():
             out[i] = robust_scale(cube.r[i, cells].astype(np.float64))
     return out
+
+
+def station_noise(cube: Cube) -> np.ndarray:
+    """S: each station's day-to-day noise level relative to a typical
+    station, from its training years as `station_scale`: the geometric mean
+    over E, N, U of the robust scale of the fast part, divided by the median
+    of that scale over stations. 1 is a typical station; NaN without data."""
+    train = (cube.split_day == TRAIN)[None, :] & cube.avail & ~cube.exclude
+    fast = np.full((cube.n_sta, 3), np.nan)
+    for i in range(cube.n_sta):
+        cells = train[i] if train[i].sum() >= 365 else cube.avail[i]
+        if cells.any():
+            x = np.where(cells[:, None], cube.r[i], np.nan).astype(np.float64)
+            fast[i] = robust_scale(fast_part(x)[cells])
+    rel = np.log(fast / np.nanmedian(fast, axis=0))
+    return np.exp(rel.mean(axis=1))
 
 
 def crps(samples: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -253,6 +295,11 @@ def station_scores(truth: np.ndarray, samples: np.ndarray, cells: np.ndarray, sk
         ratio = np.log2(robust_scale(sf, axis=1) / robust_scale(zf, axis=0)[None])   # m×3
         for k, c in enumerate(COMPONENTS):
             row[f"scale_log2_{c}"] = float(np.median(ratio[:, k]))
+        # Tails: the 99th percentile of |fast| over all samples against the truth's.
+        tail = np.log2(np.quantile(np.abs(sf), TAIL_QUANTILE, axis=(0, 1))
+                       / np.quantile(np.abs(zf), TAIL_QUANTILE, axis=0))
+        for k, c in enumerate(COMPONENTS):
+            row[f"tail_log2_{c}"] = float(tail[k])
         logr = []
         for a in range(0, len(z) - SEGMENT_DAYS + 1, SEGMENT_DAYS):
             seg = slice(a, a + SEGMENT_DAYS)
@@ -308,14 +355,15 @@ def _corr(a: np.ndarray, b: np.ndarray) -> float:
 
 def summarise(per_station: pd.DataFrame) -> dict[str, float]:
     """Median over stations of every score column, plus the mean over E, N,
-    U of the component medians (e.g. `nrmse_fast`)."""
+    U of the component medians (e.g. `nrmse_fast`); and calibration pooled
+    over stations and by station noise level (`calibration`)."""
     out: dict[str, float] = {"stations": int(len(per_station))}
     if per_station.empty:
         return out
     out["cells"] = int(per_station["cells"].sum())
     groups: dict[str, list[float]] = {}
     for col in per_station.columns:
-        if col in ("station", "cells"):
+        if col in ("station", "cells", "noise"):
             continue
         med = per_station[col].median()
         out[col] = float(med)
@@ -324,6 +372,45 @@ def summarise(per_station: pd.DataFrame) -> dict[str, float]:
             groups.setdefault(base, []).append(float(med))
     for base, meds in groups.items():
         out[base] = float(np.nanmean(meds))
+    return out | calibration(per_station)
+
+
+def calibration(per_station: pd.DataFrame) -> dict[str, float]:
+    """Calibration that a median over stations hides.
+
+    Pooled: spread/error over all scored days of all stations together,
+    √(Σ cells·spread² / Σ cells·error²) per component, then the mean over
+    components; and the 90% coverage of the fast part weighted by cells.
+    By noise: the median spread/error, 90% coverage and fast CRPS of the
+    stations in each quartile of `noise` (`station_noise`), quietest first.
+    An ensemble that cannot tell how noisy a station is will be too wide
+    for quiet stations and too narrow for noisy ones, yet right pooled."""
+    out: dict[str, float] = {}
+    if "spread_skill_e" not in per_station:
+        return out
+    w = per_station["cells"].to_numpy(float)
+    ratios = []
+    for c in COMPONENTS:
+        err = per_station[f"nrmse_total_{c}"].to_numpy(float)
+        spread = per_station[f"spread_skill_{c}"].to_numpy(float) * err
+        ok = np.isfinite(spread) & np.isfinite(err)
+        ratios.append(np.sqrt((w[ok] * spread[ok] ** 2).sum() / (w[ok] * err[ok] ** 2).sum()))
+    out["spread_skill_pooled"] = float(np.mean(ratios))
+    if "cover90_fast" in per_station:
+        cov = per_station["cover90_fast"].to_numpy(float)
+        ok = np.isfinite(cov)
+        out["cover90_fast_pooled"] = float((w[ok] * cov[ok]).sum() / w[ok].sum())
+    if "noise" in per_station and per_station["noise"].notna().sum() >= NOISE_GROUPS:
+        group = pd.qcut(per_station["noise"], NOISE_GROUPS, labels=False)
+        spread = per_station[[f"spread_skill_{c}" for c in COMPONENTS]].mean(axis=1)
+        crps_fast = per_station[[f"crps_fast_{c}" for c in COMPONENTS]].mean(axis=1)
+        for q in range(NOISE_GROUPS):
+            sel = group == q
+            out[f"noise_q{q + 1}"] = float(per_station.loc[sel, "noise"].median())
+            out[f"spread_skill_q{q + 1}"] = float(spread[sel].median())
+            out[f"crps_fast_q{q + 1}"] = float(crps_fast[sel].median())
+            if "cover90_fast" in per_station:
+                out[f"cover90_fast_q{q + 1}"] = float(per_station.loc[sel, "cover90_fast"].median())
     return out
 
 

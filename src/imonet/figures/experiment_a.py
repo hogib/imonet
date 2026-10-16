@@ -24,7 +24,8 @@ from imonet.cube import HELD_OUT, VALIDATION, Cube
 from imonet.data import component_scale
 from imonet.evaluate import DENSITIES, RESULTS, density_name, network, predict
 from imonet.baselines import make
-from imonet.figures.style import COMPONENTS, INK, INK_2, METHODS, STYLE, WIDTH, method_style, save
+from imonet.figures.style import (BASELINE, COMPONENTS, INK, INK_2, METHODS, STYLE, SURFACE, WIDTH, method_style,
+                                  save)
 from imonet.metrics import BANDS_DAYS
 
 DENSITY_ORDER = [density_name(d) for d in DENSITIES]
@@ -36,8 +37,10 @@ def load_runs(split: str = "validation", root: Path = RESULTS) -> pd.DataFrame:
 
 
 def _ordered_methods(df: pd.DataFrame) -> list[str]:
+    """The main methods present, in their fixed order. Variants (screened,
+    guided) are compared in `variants` only."""
     present = set(df["method"])
-    return [m for m in METHODS if m in present] + sorted(present - set(METHODS))
+    return [m for m in METHODS if m in present]
 
 
 def _x(densities) -> np.ndarray:
@@ -98,7 +101,7 @@ def correlation_by_distance(split: str, density: str, out: Path, root: Path = RE
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(WIDTH / 2, 2.6))
         truth = None
-        for m in [k for k in METHODS if k in files] + sorted(set(files) - set(METHODS)):
+        for m in [k for k in METHODS if k in files]:
             c = pd.read_csv(files[m], index_col=0)
             x = np.arange(len(c))
             truth = (x, c["corr_truth"].to_numpy(), list(c.index))
@@ -123,7 +126,7 @@ def spectra(split: str, density: str, out: Path, root: Path = RESULTS, seed: int
     with plt.rc_context(STYLE):
         fig, axes = plt.subplots(1, 3, figsize=(WIDTH, 2.3), sharey=True)
         for k, (ax, comp) in enumerate(zip(axes, "enu")):
-            for m in [k_ for k_ in METHODS if k_ in runs] + sorted(set(runs) - set(METHODS)):
+            for m in [k_ for k_ in METHODS if k_ in runs]:
                 y = [runs[m].get(f"psd_log10_{lo}_{hi}_{comp}", np.nan) for lo, hi in BANDS_DAYS]
                 ax.plot(range(len(bands)), y, **method_style(m))
             ax.axhline(0, color=INK_2, lw=0.8, ls=(0, (1, 2)))
@@ -194,6 +197,89 @@ def table(df: pd.DataFrame, out: Path, name: str = "experiment_a_table") -> Path
             g = sub[sub.method == m][[c for c, _ in cols]].mean()
             vals = ["--" if not np.isfinite(g[c]) else f"{g[c]:.3f}" for c, _ in cols]
             lines.append(f"{dens if j == 0 else ''} & {method_style(m)['label']} & " + " & ".join(vals) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{name}.tex"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+NOISE_PANELS = (
+    ("spread_skill", "Spread / error, total", 1.0),
+    ("cover90_fast", "90% interval coverage, fast", 0.9),
+)
+
+
+def calibration_by_noise(df: pd.DataFrame, out: Path, density: str = "60km") -> Path | None:
+    """Calibration of the generative methods by the held-out station's own
+    noise level (quartiles of `station_noise`, quietest first), and pooled
+    over all stations. Mean over thinning seeds, with their range."""
+    d = df[(df.density == density) & df.method.isin(_generative(df))]
+    if d.empty or "spread_skill_q1" not in d:
+        return None
+    quarters = ["Q1", "Q2", "Q3", "Q4"]
+    noise = d[[f"noise_q{q}" for q in range(1, 5)]].iloc[0].to_numpy()
+    ticks = [f"{q}\n{n:.2f}" for q, n in zip(quarters, noise)] + ["all\npooled"]
+    with plt.rc_context(STYLE):
+        fig, axes = plt.subplots(1, len(NOISE_PANELS), figsize=(WIDTH, 2.5))
+        for ax, (col, title, ideal) in zip(axes, NOISE_PANELS):
+            for m in _generative(d):
+                g = d[d.method == m]
+                st = method_style(m)
+                q = g[[f"{col}_q{i}" for i in range(1, 5)]]
+                ax.fill_between(range(4), q.min(), q.max(), color=st["color"], alpha=0.15, lw=0)
+                ax.plot(range(4), q.mean(), **st)
+                pooled = g[f"{col}_pooled"]
+                ax.errorbar([4.6], [pooled.mean()], yerr=[[pooled.mean() - pooled.min()], [pooled.max() - pooled.mean()]],
+                            color=st["color"], marker=st["marker"], markerfacecolor=SURFACE, lw=1, capsize=0)
+            ax.axhline(ideal, color=INK_2, lw=0.8, ls=(0, (1, 2)))
+            ax.axvline(3.8, color=BASELINE, lw=0.6)
+            ax.set_xticks([0, 1, 2, 3, 4.6], ticks, fontsize=7)
+            ax.set_xlim(-0.3, 4.9)
+            ax.set_title(title, fontsize=8)
+            ax.margins(y=0.2)
+        axes[0].legend(loc="upper right")
+        fig.supxlabel("Held-out station's noise quartile (median noise relative to a typical station)",
+                      fontsize=8, y=0.03)
+        fig.tight_layout(rect=(0, 0.05, 1, 1))
+        return save(fig, out, f"calibration_by_noise_{density}")
+
+
+VARIANT_COLS = (("crps_fast", "CRPS$_f$"), ("cover90_fast", "Cov.$_{90,f}$"), ("spread_skill", "S/E"),
+                ("spread_skill_pooled", "S/E$_\\mathrm{pool}$"), ("tail_log2", "Tail"), ("corr_error", "$|\\Delta r|$"),
+                ("screened", "Scr.\\,\\%"))
+
+
+def variants(split: str, out: Path, root: Path = RESULTS, density: str = "60km", seed: int = 0,
+             name: str = "variants_table") -> Path | None:
+    """Sampling variants of the generative methods on one thinned network:
+    screened samples and classifier-free guidance weights, as a LaTeX
+    tabular. |Δr| is the mean over distance bins of the absolute error of
+    the neighbour correlation."""
+    rows = []
+    for p in sorted((root / "A").glob(f"*/{split}/{density}_s{seed}/summary.json")):
+        s = json.loads(p.read_text())
+        if s.get("samples", 1) <= 1:
+            continue
+        corr = p.parent / "correlations.csv"
+        s["corr_error"] = pd.read_csv(corr)["difference"].abs().mean() if corr.exists() else np.nan
+        s["screened"] = 100 * s["screened"] if "screened" in s else np.nan
+        rows.append(s)
+    if not rows:
+        return None
+    df = pd.DataFrame(rows)
+    df["base"] = df["kind"].fillna(df["method"]) if "kind" in df else df["method"]
+    df["w"] = df["guidance"].fillna(1.0) if "guidance" in df else 1.0
+    df["scr"] = df["method"].str.endswith("-screened")
+    df = df.sort_values(["base", "w", "scr"], key=lambda c: c.map(list(METHODS).index) if c.name == "base" else c)
+    lines = [r"\begin{tabular}{lrl" + "r" * len(VARIANT_COLS) + "}", r"\toprule",
+             "Method & $w$ & Screened & " + " & ".join(h for _, h in VARIANT_COLS) + r" \\", r"\midrule"]
+    for _, r in df.iterrows():
+        vals = ["--" if c not in r or not np.isfinite(r[c]) else
+                (f"{r[c]:.2f}" if c == "screened" else f"{r[c]:.3f}") for c, _ in VARIANT_COLS]
+        w = f"{r['w']:g}" if r["base"] == "diffusion" else "--"
+        lines.append(f"{method_style(r['base'])['label']} & {w} & {'yes' if r['scr'] else 'no'} & "
+                     + " & ".join(vals) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{name}.tex"

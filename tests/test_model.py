@@ -4,7 +4,7 @@ import torch
 
 from imonet.cube import HELD_OUT, NORMAL, VALIDATION
 from imonet.data import component_scale
-from imonet.evaluate import predict
+from imonet.evaluate import predict, screened
 from imonet.model.edm import EDM, EDMConfig, Regress, drop_condition
 from imonet.model.methods import DiffusionMethod, RegressMethod
 from imonet.model.net import Net, NetConfig
@@ -130,3 +130,7 @@ def test_train_resume_and_evaluate(tmp_path, kind):
                    VALIDATION, length=32, k=6)
     assert pred.samples.shape[0] == (2 if kind == "diffusion" else 1)
     assert np.isfinite(pred.samples).all()
+    if kind == "diffusion":                       # run() screens ensembles only
+        spred, share = screened(pred)
+        assert spred.samples.shape == pred.samples.shape and 0 <= share < 0.05
+        assert np.array_equal(np.isnan(spred.samples), np.isnan(pred.samples))

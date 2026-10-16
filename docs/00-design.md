@@ -323,11 +323,23 @@ How they are computed (`imonet.metrics`, `imonet.evaluate`):
 - **Spread against error**: ensemble spread (with the (m+1)/m finite-
   ensemble factor) divided by the RMSE of the sample mean, total part; 1 is
   calibrated.
+- **Calibration a median hides**: spread/error pooled over all scored days
+  of all stations, cell-weighted fast 90% coverage, and spread/error, fast
+  coverage and fast CRPS by quartile of the station's own noise level
+  (`station_noise`: robust scale of its training-years fast part relative
+  to a typical station's). A method that cannot know a station's noise is
+  too wide for quiet stations and too narrow for noisy ones.
+- **Screening**: `eval --screen` also scores the samples screened with the
+  cube's outlier rule (`metrics.screen`, 61-day running median, 5 robust
+  σ; a flagged value becomes the running median), as `<label>-screened`.
+  The observed series were screened when the cube was built. Generative
+  methods are scored screened from 2026-10-16.
 - **Spectra**: periodograms of 256-day segments of the scored period with at
   least 90% of days (gaps filled linearly, line removed, Hann taper), as
   log10 of sample over truth in bands of 2–4, 4–8, …, 64–128 days; samples
   are cut to the truth's days first. **Scale**: log2 of the robust scale of
-  each sample's fast part over the truth's.
+  each sample's fast part over the truth's. **Tail**: log2 of the 99th
+  percentile of |fast part| over all samples over the truth's.
 - **Neighbour correlation**: correlation of the fast parts of target and
   neighbour over each window, truth and samples, averaged by distance bin
   (0–10, 10–25, 25–50, 50–100, 100–200, 200–300 km).
@@ -435,13 +447,27 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   (§4.3), tuned on validation.
 - Window length: 256 days to start. Longer windows reach more of the slow
   part.
-- Whether classifier-free guidance helps, and at what weight.
 - How to scale inputs for very large offsets (§6.3).
 - Excess variability of the first diffusion model (`diffusion-v1`, validation
-  2026-10-16): calibrated in the bulk, but rare large departures (slow drifts
-  of up to 10 mm, jumps) make its ensembles 21–26% too wide over the whole
-  series and its 99.9th percentile 1.5× the truth's. Candidates, to compare
-  on validation: screen samples with the cube's running-median rule (the
-  truth was screened, the samples are not); train on residuals without the
-  estimated earthquake offsets (`qstep_*`), as gnssdl's learned models do;
-  classifier-free guidance with weight > 1.
+  2026-10-16): calibrated in the bulk, but 21–26% too wide over the whole
+  series at the median station. Resolved as follows (report, "The model
+  cannot know how noisy a station is"):
+  - Screening the samples with the cube's rule (`metrics.screen`, `eval
+    --screen`) flags 0.07% of values and changes little. Kept: generative
+    methods are scored screened from now on.
+  - Classifier-free guidance narrows the ensemble only by exaggerating the
+    shared signal (w = 1.2: spread/error 1.02 but fast 90% coverage 0.85,
+    neighbour correlation +0.07; w = 1.5 worse everywhere). Not used.
+  - Earthquake offsets are not the cause: sampled on its own training
+    distribution the model is as wide as on validation (per-window
+    spread/error 1.14 without a step, 1.12 with, 1.11 validation).
+    Removing `qstep_*` from training is set aside (may still suit B).
+  - Cause: the model cannot know the target's own noise level and hedges
+    over it, like idw+noise. Spread/error falls from 1.43 (quietest
+    quartile of held-out stations by `station_noise`) to 0.97 (noisiest);
+    pooled over stations the fast 90% coverage is 0.91 and the total
+    spread/error 1.11–1.18 (a residual long-period excess).
+  `summarise` now reports pooled calibration and calibration by noise
+  quartile; `imonet rescore` recomputes summaries from stations.csv.
+- Optional conditioning on the virtual station's noise level (proposed
+  2026-10-16, §4.4 when adopted): to be decided.

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -29,8 +29,8 @@ import pandas as pd
 from imonet.baselines import LENGTH_SCALES_KM, Method, make
 from imonet.cube import HELD_OUT, NORMAL, VALIDATION, Cube, pairwise_km
 from imonet.data import WINDOW_DAYS, component_scale, context, day_of_year, detrend, target
-from imonet.metrics import (correlation_by_distance, event_mask, neighbour_correlations, scoring_qc,
-                            station_scale, station_scores, summarise)
+from imonet.metrics import (correlation_by_distance, event_mask, neighbour_correlations, scoring_qc, screen,
+                            station_noise, station_scale, station_scores, summarise)
 from imonet.network import K_NEIGHBOURS, thin
 
 RESULTS = Path("runs")
@@ -111,9 +111,25 @@ def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, 
     return Prediction(targets, days, truth, out, records)
 
 
+def screened(pred: Prediction) -> tuple[Prediction, float]:
+    """The prediction with every sample screened for outliers as the cube's
+    real series were (`metrics.screen`), on the days the truth exists, and
+    the share of those sample values that were outliers."""
+    have = np.isfinite(pred.truth)[None]
+    x = np.where(have, pred.samples, np.nan)
+    out = np.empty_like(pred.samples)
+    bad = np.zeros(pred.samples.shape, dtype=bool)
+    for ti in range(len(pred.targets)):
+        xs, b = screen(np.moveaxis(x[:, ti], 0, 1))                 # days × m × 3
+        out[:, ti], bad[:, ti] = np.moveaxis(xs, 1, 0), np.moveaxis(b, 1, 0)
+    out = np.where(have, out, pred.samples)
+    return replace(pred, samples=out.astype(pred.samples.dtype)), float(bad[have.repeat(len(out), 0)].mean())
+
+
 def score(cube: Cube, pred: Prediction, scales: np.ndarray, skip: np.ndarray, keep: np.ndarray,
-          length: int = WINDOW_DAYS) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(per-station scores, neighbour correlation pairs)."""
+          length: int = WINDOW_DAYS, noise: np.ndarray | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(per-station scores, neighbour correlation pairs). `noise`
+    (`station_noise`) is recorded with each station's scores."""
     rows = []
     for ti, s in enumerate(pred.targets):
         if not keep[s]:
@@ -123,7 +139,7 @@ def score(cube: Cube, pred: Prediction, scales: np.ndarray, skip: np.ndarray, ke
         cells = np.isfinite(truth).all(axis=1) & np.isfinite(samples[0]).all(axis=1)
         row = station_scores(truth, samples, cells, skip[s, pred.days], scales[s])
         if row is not None:
-            rows.append({"station": str(cube.sta[s]), **row})
+            rows.append({"station": str(cube.sta[s]), **({} if noise is None else {"noise": float(noise[s])}), **row})
 
     pairs = []
     if pred.samples.shape[0] > 1:
@@ -151,6 +167,7 @@ class Setup:
         self.cube = cube
         self.scale = component_scale(cube)
         self.station_scale = station_scale(cube)
+        self.noise = station_noise(cube)
         self.skip = event_mask(cube, steps)
         self.keep, self.qc_dropped = scoring_qc(cube, steps)
 
@@ -206,27 +223,53 @@ def method_for(setup: Setup, method_name: str, density: float | None, n_samples:
 
 def run(setup: Setup, method_name: str, split: int, split_name: str, density: float | None, seed: int,
         n_samples: int = 32, root: Path = RESULTS, model_dir: Path | None = None, label: str | None = None,
-        steps: int = 32, guidance: float = 1.0) -> dict:
+        steps: int = 32, guidance: float = 1.0, screen: bool = False) -> list[dict]:
     """One run of experiment A; writes its results under `label` (default
-    the method name) and returns the summary."""
+    the method name) and returns the summary. With `screen`, the same
+    samples screened for outliers are also scored, as `<label>-screened`."""
     t = time.time()
     cube = setup.cube
     label = label or method_name
     method, extra = method_for(setup, method_name, density, n_samples, root, model_dir, steps, guidance)
     net = network(cube, density, seed)
     pred = predict(method, cube, setup.scale, cube.stations(HELD_OUT), net, split, seed)
-    per, pairs = score(cube, pred, setup.station_scale, setup.skip, setup.keep)
-    summary = {"method": label, "kind": method_name, "split": split_name, "density": density_name(density),
-               "seed": seed, "network_stations": int(len(net)), "samples": method.n_samples, **extra, **summarise(per),
-               "seconds": round(time.time() - t, 1)}
+    variants = [(label, pred, {})]
+    if screen and method.n_samples > 1:
+        spred, share = screened(pred)
+        variants.append((f"{label}-screened", spred, {"screened": share}))
+    summaries = []
+    for name, p, more in variants:
+        per, pairs = score(cube, p, setup.station_scale, setup.skip, setup.keep, noise=setup.noise)
+        summary = {"method": name, "kind": method_name, "split": split_name, "density": density_name(density),
+                   "seed": seed, "network_stations": int(len(net)), "samples": method.n_samples, **extra, **more,
+                   **summarise(per), "seconds": round(time.time() - t, 1)}
+        out = run_dir(name, split_name, density, seed, root)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "summary.json").write_text(json.dumps(summary, indent=1))
+        per.to_csv(out / "stations.csv", index=False)
+        if len(pairs):
+            correlation_by_distance(pairs).to_csv(out / "correlations.csv")
+        summaries.append(summary)
+    return summaries
 
-    out = run_dir(label, split_name, density, seed, root)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "summary.json").write_text(json.dumps(summary, indent=1))
-    per.to_csv(out / "stations.csv", index=False)
-    if len(pairs):
-        correlation_by_distance(pairs).to_csv(out / "correlations.csv")
-    return summary
+
+def rescore(cube: Cube, split_name: str = "validation", root: Path = RESULTS) -> int:
+    """Recompute every run's summary of a split from its per-station scores
+    (stations.csv), after adding each station's noise level; for when the
+    summary changes and the samples are long gone. Returns the runs updated."""
+    noise = dict(zip(map(str, cube.sta), station_noise(cube)))
+    n = 0
+    for path in sorted((root / "A").glob(f"*/{split_name}/*/stations.csv")):
+        per = pd.read_csv(path)
+        if per.empty:
+            continue
+        per["noise"] = per["station"].astype(str).map(noise)
+        per.to_csv(path, index=False)
+        summary_path = path.parent / "summary.json"
+        summary = json.loads(summary_path.read_text())
+        summary_path.write_text(json.dumps(summary | summarise(per), indent=1))
+        n += 1
+    return n
 
 
 def report(split_name: str = "validation", root: Path = RESULTS) -> pd.DataFrame:
@@ -237,7 +280,8 @@ def report(split_name: str = "validation", root: Path = RESULTS) -> pd.DataFrame
         return pd.DataFrame()
     df = pd.DataFrame(rows)
     cols = ["nrmse_fast", "nrmse_slow", "nrmse_total", "crps_fast", "crps_total", "energy_total",
-            "cover50_fast", "cover90_fast", "spread_skill", "scale_log2"]
+            "cover50_fast", "cover90_fast", "spread_skill", "spread_skill_pooled", "cover90_fast_pooled",
+            "spread_skill_q1", "spread_skill_q4", "scale_log2", "tail_log2"]
     cols = [c for c in cols if c in df]
     order = {density_name(d): i for i, d in enumerate(DENSITIES)}
     g = df.groupby(["method", "density"])[cols].mean()

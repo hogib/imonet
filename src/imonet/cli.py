@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--label", help="name of the results (default: the method)")
     e.add_argument("--sampler-steps", type=int, default=32)
     e.add_argument("--guidance", type=float, default=1.0)
+    e.add_argument("--screen", action="store_true",
+                   help="also score the samples screened for outliers as the cube was, as <label>-screened")
 
     t = sub.add_parser("train", help="train the diffusion model or regress")
     t.add_argument("kind", choices=["diffusion", "regress"])
@@ -49,6 +51,9 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--val-every", type=int, default=TrainConfig.val_every)
     t.add_argument("--workers", type=int, default=TrainConfig.workers)
     t.add_argument("--seed", type=int, default=TrainConfig.seed)
+
+    rs = sub.add_parser("rescore", help="recompute run summaries from their per-station scores")
+    rs.add_argument("--split", choices=list(SPLITS), default="validation")
 
     r = sub.add_parser("report", help="print the experiment A table")
     r.add_argument("--split", choices=list(SPLITS), default="validation")
@@ -62,6 +67,10 @@ def main(argv: list[str] | None = None) -> None:
     if a.cmd == "report":
         with pd.option_context("display.width", 200, "display.max_columns", 30, "display.precision", 3):
             print(report(a.split, a.results))
+        return
+    if a.cmd == "rescore":
+        from imonet.evaluate import rescore
+        print(f"rescored {rescore(Cube.load(a.cube), a.split, a.results)} runs")
         return
     if a.cmd == "figures":
         from imonet.figures import make_all
@@ -89,8 +98,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"scoring QC drops {len(setup.qc_dropped)} stations")
     for d in map(_density, a.density):
         for seed in ([0] if d is None else range(a.seeds)):
-            s = run(setup, a.method, SPLITS[a.split], a.split, d, seed, a.samples, a.results, a.model, a.label,
-                    a.sampler_steps, a.guidance)
-            print(f"{a.method} {s['density']} s{seed}: nrmse_fast {s.get('nrmse_fast', float('nan')):.3f} "
-                  f"crps_fast {s.get('crps_fast', float('nan')):.3f} ({s['stations']} stations, "
-                  f"{s['seconds']} s)", flush=True)
+            for s in run(setup, a.method, SPLITS[a.split], a.split, d, seed, a.samples, a.results, a.model,
+                         a.label, a.sampler_steps, a.guidance, a.screen):
+                print(f"{s['method']} {s['density']} s{seed}: nrmse_fast {s.get('nrmse_fast', float('nan')):.3f} "
+                      f"crps_fast {s.get('crps_fast', float('nan')):.3f} ({s['stations']} stations, "
+                      f"{s['seconds']} s)", flush=True)

@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from imonet.metrics import (band_psd, crps, energy_score, event_mask, inside, neighbour_correlations, slow_part,
+from imonet.metrics import (band_psd, crps, energy_score, event_mask, inside, neighbour_correlations, screen, slow_part,
+                            station_noise,
                             station_scores, summarise)
 
 from test_data import synthetic_cube
@@ -109,3 +110,57 @@ def test_summary_is_median_and_component_mean():
                         "nrmse_fast_u": [3.0, 3.0, 3.0]})
     s = summarise(per)
     assert s["nrmse_fast_e"] == 2.0 and s["nrmse_fast"] == pytest.approx(2.0)
+
+
+def test_screen_flags_spikes_not_steps():
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((400, 2, 3))
+    x[200:, 1] += 20.0                                   # a step: kept
+    x[100, 0, 1] += 15.0                                 # a spike: replaced
+    x[50:60, 0] = np.nan
+    out, bad = screen(x)
+    assert bad[100, 0, 1] and not bad[195:205, 1].any()
+    assert bad.mean() < 0.005
+    assert abs(out[100, 0, 1]) < 3 and np.isnan(out[50:60, 0]).all()
+    assert np.array_equal(out[~bad], x[~bad], equal_nan=True)
+
+
+def test_screen_matches_the_cube_rule():
+    """Same days as gnssdl's dataset.screen_outliers (61 days, 5 σ, 15 days)."""
+    rng = np.random.default_rng(1)
+    x = rng.standard_t(3, size=(600, 3))
+    x[rng.random(600) < 0.1] = np.nan
+    daily = pd.DataFrame(x)
+    ref = np.zeros(600, dtype=bool)
+    for c in range(3):
+        med = daily[c].rolling(61, center=True, min_periods=15).median()
+        dev = (daily[c] - med).abs()
+        ref |= (dev > 5.0 * 1.4826 * dev.rolling(61, center=True, min_periods=15).median()).to_numpy()
+    _, bad = screen(x)
+    assert ref.any() and np.array_equal(bad.any(axis=1), ref)
+
+
+def test_calibration_pooled_and_by_noise():
+    """An ensemble with one width for every station: too wide where the
+    station is quiet, too narrow where it is noisy, right pooled."""
+    noise = np.linspace(0.5, 1.5, 40)
+    err = noise                                         # error grows with the station's noise
+    spread = np.full(40, np.sqrt(np.mean(noise ** 2)))  # one spread for all, right on average
+    per = pd.DataFrame({"station": [f"S{i}" for i in range(40)], "cells": 100, "noise": noise,
+                        "cover90_fast": 0.9,
+                        **{f"nrmse_total_{c}": err for c in "enu"},
+                        **{f"spread_skill_{c}": spread / err for c in "enu"},
+                        **{f"crps_fast_{c}": 0.3 * noise for c in "enu"}})
+    out = summarise(per)
+    assert out["spread_skill_pooled"] == pytest.approx(1.0)
+    assert out["spread_skill_q1"] > 1.4 and out["spread_skill_q4"] < 0.9
+    assert out["noise_q1"] < out["noise_q4"] and out["cover90_fast_pooled"] == pytest.approx(0.9)
+    assert "noise" not in out
+
+
+def test_station_noise_is_relative_to_a_typical_station():
+    cube = synthetic_cube()
+    cube.r[0] *= 3.0
+    noise = station_noise(cube)
+    assert np.nanmedian(noise) == pytest.approx(1.0, rel=0.2)
+    assert noise[0] > 2.0 * np.nanmedian(noise)
