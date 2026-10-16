@@ -79,10 +79,11 @@ class Prediction:
 
 def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, net: np.ndarray,
             split: int, seed: int = 0, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS,
-            noise_log: np.ndarray | None = None) -> Prediction:
+            noise_log: np.ndarray | None = None, progress=None) -> Prediction:
     """Every method sees the same contexts; with `noise_log` (S×3,
     `station_noise_log`) they include the target's noise level, which only
-    a diffusion model trained with it and told to use it reads."""
+    a diffusion model trained with it and told to use it reads. `progress`
+    is called with a line about every tenth of the windows."""
     ok = cube.avail
     method.prepare(cube, scale, net, ok)
     wins = period_windows(cube, split, length)
@@ -92,7 +93,11 @@ def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, 
     jobs = [(ti, t0, first) for ti, s in enumerate(targets) for t0, first in wins
             if ok[s, first:t0 + length].any()]
     records = []
+    t_start, next_report = time.time(), 0.1
     for a in range(0, len(jobs), BATCH):
+        if progress and a / len(jobs) >= next_report:
+            progress(f"  {a}/{len(jobs)} windows, {time.time() - t_start:.0f} s")
+            next_report += 0.1
         chunk = jobs[a:a + BATCH]
         ctxs, truths = [], []
         for ti, t0, _ in chunk:
@@ -268,7 +273,8 @@ def kriging_covariance(setup: Setup, root: Path = RESULTS) -> Covariance:
 
 def run(setup: Setup, method_name: str, split: int, split_name: str, density: float | None, seed: int,
         n_samples: int = 32, root: Path = RESULTS, model_dir: Path | None = None, label: str | None = None,
-        steps: int = 32, guidance: float = 1.0, screen: bool = False, target_noise: str = "unknown") -> list[dict]:
+        steps: int = 32, guidance: float = 1.0, screen: bool = False, target_noise: str = "unknown",
+        progress=None) -> list[dict]:
     """One run of experiment A; writes its results under `label` (default
     the method name) and returns the summary. With `screen`, the same
     samples screened for outliers are also scored, as `<label>-screened`."""
@@ -278,7 +284,8 @@ def run(setup: Setup, method_name: str, split: int, split_name: str, density: fl
     method, extra = method_for(setup, method_name, density, n_samples, root, model_dir, steps, guidance,
                                target_noise)
     net = network(cube, density, seed)
-    pred = predict(method, cube, setup.scale, cube.stations(HELD_OUT), net, split, seed, noise_log=setup.noise_log)
+    pred = predict(method, cube, setup.scale, cube.stations(HELD_OUT), net, split, seed, noise_log=setup.noise_log,
+                   progress=progress)
     variants = [(label, pred, {})]
     if screen and method.n_samples > 1:
         spred, share = screened(pred)

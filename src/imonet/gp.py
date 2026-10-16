@@ -43,6 +43,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+import torch
 
 from imonet.baselines import Method
 from imonet.cube import TRAIN, Cube, pairwise_km
@@ -293,9 +294,12 @@ class GP(Method):
         h[2 * kk, np.arange(n)] = 1.0
         h[2 * kk + 1, np.arange(n)] = tc
         h = h[np.abs(h).sum(1) > 0]
-        chol = np.linalg.cholesky(k_oo)
-        solve = lambda v: np.linalg.solve(chol.T, np.linalg.solve(chol, v))
-        ki_y, ki_h, ki_kot = solve(y), solve(h.T), solve(k_to.T)          # n, n×p, n×L
+        # One Cholesky factorisation for every right-hand side (y, H, K_to).
+        rhs = np.concatenate([y[:, None], h.T, k_to.T], axis=1)
+        chol = torch.linalg.cholesky(torch.from_numpy(k_oo))
+        sol = torch.cholesky_solve(torch.from_numpy(rhs), chol).numpy()
+        p_ = len(h)
+        ki_y, ki_h, ki_kot = sol[:, 0], sol[:, 1:1 + p_], sol[:, 1 + p_:]   # n, n×p, n×L
         a = h @ ki_h                                                      # p×p
         beta = np.linalg.solve(a, h @ ki_y)
         mean = k_to @ (ki_y - ki_h @ beta)

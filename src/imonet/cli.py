@@ -108,7 +108,8 @@ def main(argv: list[str] | None = None) -> None:
     for d in map(_density, a.density):
         for seed in ([0] if d is None else range(a.seeds)):
             for s in run(setup, a.method, SPLITS[a.split], a.split, d, seed, a.samples, a.results, a.model,
-                         a.label, a.sampler_steps, a.guidance, a.screen, a.target_noise):
+                         a.label, a.sampler_steps, a.guidance, a.screen, a.target_noise,
+                         progress=lambda line: print(line, flush=True)):
                 print(f"{s['method']} {s['density']} s{seed}: nrmse_fast {s.get('nrmse_fast', float('nan')):.3f} "
                       f"crps_fast {s.get('crps_fast', float('nan')):.3f} ({s['stations']} stations, "
                       f"{s['seconds']} s)", flush=True)
