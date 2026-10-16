@@ -136,18 +136,25 @@ def spectra(split: str, density: str, out: Path, root: Path = RESULTS, seed: int
 
 
 def example(cube: Cube, out: Path, method: str = "idw+noise", density: float | None = 60.0,
-            station: str | None = None, n_show: int = 8, root: Path = RESULTS) -> Path | None:
+            station: str | None = None, n_show: int = 8, root: Path = RESULTS,
+            model_dir: Path | None = None) -> Path | None:
     """One held-out station in its first validation window: the truth, a
     few samples and the sample mean, per component."""
-    tuning = root / "A" / "idw_tuning.json"
-    if method in ("idw", "idw+noise") and not tuning.exists():
-        return None
-    length_km = json.loads(tuning.read_text())[density_name(density)]["length_km"] \
-        if method in ("idw", "idw+noise") else None
+    if method == "diffusion":
+        if model_dir is None or not (model_dir / "checkpoint.pt").exists():
+            return None
+        from imonet.model.methods import DiffusionMethod
+        m = DiffusionMethod(model_dir, n_samples=32)
+    else:
+        tuning = root / "A" / "idw_tuning.json"
+        if method in ("idw", "idw+noise") and not tuning.exists():
+            return None
+        length_km = json.loads(tuning.read_text())[density_name(density)]["length_km"] \
+            if method in ("idw", "idw+noise") else None
+        m = make(method, length_km, 32)
     held = cube.stations(HELD_OUT)
     s = held[0] if station is None else int(np.flatnonzero(cube.sta == station)[0])
-    pred = predict(make(method, length_km, 32), cube, component_scale(cube), np.array([s]),
-                   network(cube, density, 0), VALIDATION)
+    pred = predict(m, cube, component_scale(cube), np.array([s]), network(cube, density, 0), VALIDATION)
     w = pred.windows[0]
     cols = np.arange(w["t0"], w["t0"] + 256) - pred.days[0]
     days = cube.days[pred.days[cols]]

@@ -437,3 +437,11 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   part.
 - Whether classifier-free guidance helps, and at what weight.
 - How to scale inputs for very large offsets (§6.3).
+- Excess variability of the first diffusion model (`diffusion-v1`, validation
+  2026-10-16): calibrated in the bulk, but rare large departures (slow drifts
+  of up to 10 mm, jumps) make its ensembles 21–26% too wide over the whole
+  series and its 99.9th percentile 1.5× the truth's. Candidates, to compare
+  on validation: screen samples with the cube's running-median rule (the
+  truth was screened, the samples are not); train on residuals without the
+  estimated earthquake offsets (`qstep_*`), as gnssdl's learned models do;
+  classifier-free guidance with weight > 1.

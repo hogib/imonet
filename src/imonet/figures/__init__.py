@@ -12,13 +12,16 @@ from pathlib import Path
 from imonet.cube import Cube
 from imonet.evaluate import RESULTS
 
-FIGURES = ("network_map", "thinning", "scores_by_density", "correlation", "spectra", "example", "table")
+DIFFUSION_MODEL = "diffusion-v1"      # the model drawn in example figures
+FIGURES = ("network_map", "thinning", "training", "scores_by_density", "correlation", "spectra", "example",
+           "table")
 
 
 def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "validation",
              only: tuple[str, ...] = FIGURES) -> dict[str, Path | None]:
     from imonet.figures import experiment_a as A
     from imonet.figures import network as N
+    from imonet.figures import training as T
 
     made: dict[str, Path | None] = {}
     runs = A.load_runs(split, results)
@@ -26,6 +29,8 @@ def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "valid
         made["network_map"] = N.network_map(cube, out)
     if "thinning" in only:
         made["thinning"] = N.thinning(cube, out)
+    if "training" in only:
+        made["training"] = T.training_curves(out, results)
     if runs.empty:
         for f in only:
             made.setdefault(f, None)
@@ -41,4 +46,6 @@ def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "valid
             made[f"spectra_{dens}"] = A.spectra(split, dens, out, results)
     if "example" in only:
         made["example"] = A.example(cube, out, root=results)
+        model = results / "models" / DIFFUSION_MODEL
+        made["example_diffusion"] = A.example(cube, out, "diffusion", root=results, model_dir=model)
     return made

@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--steps", type=int, default=TrainConfig.steps)
     t.add_argument("--batch", type=int, default=TrainConfig.batch)
     t.add_argument("--lr", type=float, default=TrainConfig.lr)
+    t.add_argument("--log-every", type=int, default=TrainConfig.log_every)
     t.add_argument("--val-every", type=int, default=TrainConfig.val_every)
     t.add_argument("--workers", type=int, default=TrainConfig.workers)
     t.add_argument("--seed", type=int, default=TrainConfig.seed)
@@ -71,7 +72,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if a.cmd == "train":
         from imonet.train import train
-        cfg = TrainConfig(kind=a.kind, steps=a.steps, batch=a.batch, lr=a.lr, val_every=a.val_every,
+        cfg = TrainConfig(kind=a.kind, steps=a.steps, batch=a.batch, lr=a.lr, log_every=a.log_every, val_every=a.val_every,
                           workers=a.workers, seed=a.seed)
         root = a.results / "models"
         log_path = root / a.name / "train.log"

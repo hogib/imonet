@@ -4,7 +4,8 @@ A model lives in runs/models/<name>/:
   config.json      what was trained, with the component scale it uses
   checkpoint.pt    latest weights, EMA weights, optimiser, step (resumable)
   history.json     training and validation loss per evaluation
-  train.log        progress, one line per evaluation
+  steps.csv        training loss, gradient norm, learning rate and speed every log_every steps
+  train.log        progress: a line every log_every steps, and one per evaluation
 
 The EMA weights are the model: they are what evaluation samples from. The
 validation loss uses fixed samples (held-out stations, validation days)
@@ -46,6 +47,7 @@ class TrainConfig:
     warmup: int = 2_000
     ema_decay: float = 0.999
     grad_clip: float = 1.0
+    log_every: int = 100
     val_every: int = 2_000
     val_samples: int = 1_024
     samples_per_epoch: int = 64_000
@@ -138,7 +140,12 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
         warm = min(1.0, (s + 1) / cfg.warmup)
         return cfg.lr * warm * 0.5 * (1 + math.cos(math.pi * min(1.0, s / cfg.steps)))
 
+    steps_csv = out / "steps.csv"
+    if not steps_csv.exists():
+        steps_csv.write_text("step,epoch,loss,grad_norm,lr,steps_per_s,elapsed_s\n")
+    per_epoch = cfg.samples_per_epoch // cfg.batch
     t0, run_loss, run_n = time.time(), 0.0, 0
+    t_log, log_loss, log_grad, log_n, t_start = time.time(), 0.0, 0.0, 0, time.time()
     while step < cfg.steps:
         train_ds.set_epoch(step // (cfg.samples_per_epoch // cfg.batch))
         loader = DataLoader(train_ds, batch_size=cfg.batch, num_workers=cfg.workers, shuffle=False,
@@ -157,14 +164,29 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
                 loss = model.loss(b, generator=g)
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), cfg.grad_clip)
+            grad = torch.nn.utils.clip_grad_norm_(net.parameters(), cfg.grad_clip).item()
             opt.step()
             with torch.no_grad():
                 for pe, p in zip(ema.parameters(), net.parameters()):
                     pe.lerp_(p, 1 - cfg.ema_decay)
             run_loss += loss.item()
             run_n += 1
+            log_loss += loss.item()
+            log_grad += grad
+            log_n += 1
             step += 1
+
+            if step % cfg.log_every == 0:
+                rate = log_n / (time.time() - t_log)
+                eta = (cfg.steps - step) / max(rate, 1e-9)
+                epoch = step / per_epoch
+                log(f"step {step:7d}  epoch {epoch:6.2f}  loss {log_loss / log_n:.4f}  "
+                    f"grad {log_grad / log_n:.3f}  lr {lr_at(step):.2e}  {rate:.1f} steps/s  "
+                    f"eta {int(eta // 3600)}h{int(eta % 3600 // 60):02d}m")
+                with open(steps_csv, "a") as fh:
+                    fh.write(f"{step},{epoch:.4f},{log_loss / log_n:.6f},{log_grad / log_n:.6f},"
+                             f"{lr_at(step):.6e},{rate:.3f},{time.time() - t_start:.1f}\n")
+                t_log, log_loss, log_grad, log_n = time.time(), 0.0, 0.0, 0
 
             if step % cfg.val_every == 0 or step == cfg.steps:
                 rate = run_n / (time.time() - t0)                 # training only, before validating
@@ -172,12 +194,13 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
                 row = {"step": step, "train_loss": run_loss / max(run_n, 1), "val_loss": val,
                        "lr": lr_at(step), "steps_per_s": round(rate, 2)}
                 history.append(row)
-                log(f"step {step:7d}  train {row['train_loss']:.4f}  val {val:.4f}  "
-                    f"lr {row['lr']:.2e}  {rate:.1f} steps/s")
+                log(f"VAL  step {step:7d}  epoch {step / per_epoch:6.2f}  train {row['train_loss']:.4f}  "
+                    f"val {val:.4f}  lr {row['lr']:.2e}  {rate:.1f} steps/s")
                 torch.save({"net": net.state_dict(), "ema": ema.state_dict(), "opt": opt.state_dict(),
                             "step": step}, ckpt)
                 (out / "history.json").write_text(json.dumps(history, indent=1))
                 t0, run_loss, run_n = time.time(), 0.0, 0
+                t_log = time.time()                               # validation time is not training speed
     return out
 
 

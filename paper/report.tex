@@ -22,7 +22,7 @@
 
 \begin{frontmatter}
 
-\title{Generating virtual GNSS stations from their neighbours with a conditional diffusion model: design and baselines\tnoteref{wr}}
+\title{Generating virtual GNSS stations from their neighbours with a conditional diffusion model: design, baselines and a first model\tnoteref{wr}}
 \tnotetext[wr]{Working report, drafted with Claude Code. It records the state of the project and is updated as results come in.}
 
 \author[ytu]{H. O\u{g}uz Bolat\corref{cor}}
@@ -33,7 +33,7 @@
   city={Istanbul}, country={T\"urkiye}}
 
 \begin{abstract}
-Continuous GNSS networks are dense in a few regions and sparse in most others, yet many applications need displacement time series at locations without a station. We propose to generate daily residual series at arbitrary locations from the stations around them with a conditional diffusion model, and to judge the generated series as samples rather than as point predictions. Because a station's series is only partly predictable from its neighbours, a regression model returns series that are too smooth; a generative model can reproduce the station-specific noise while inheriting the shared signal. The model is trained and validated on 1,251 stations in and around California, where real stations can be hidden and their generated counterparts compared with the truth, and tested on the network of T\"urkiye, whose median nearest-neighbour distance (60~km) is about six times California's. To learn sparse geometries from a dense network, training samples are drawn from networks thinned by minimum-separation thinning, which, unlike random subsampling, reproduces the station spacing of T\"urkiye. We describe the data, the sampling design and the evaluation protocol, which combines point, probabilistic and realism scores with planted fault-slip events, and report three baselines against which the diffusion model will be measured. On held-out stations, the short-period error of a weighted neighbour mean depends little on network density, because the shared short-period signal is dominated by common-mode error coherent over hundreds of kilometres. Adding white and flicker noise fitted to the neighbours yields a well-calibrated generative baseline, with a continuous ranked probability score 26\% below that of the mean alone, but its samples do not reproduce the decrease of inter-station correlation with distance.
+Continuous GNSS networks are dense in a few regions and sparse in most others, yet many applications need displacement time series at locations without a station. We propose to generate daily residual series at arbitrary locations from the stations around them with a conditional diffusion model, and to judge the generated series as samples rather than as point predictions. Because a station's series is only partly predictable from its neighbours, a regression model returns series that are too smooth; a generative model can reproduce the station-specific noise while inheriting the shared signal. The model is trained and validated on 1,251 stations in and around California, where real stations can be hidden and their generated counterparts compared with the truth, and tested on the network of T\"urkiye, whose median nearest-neighbour distance (60~km) is about six times California's. To learn sparse geometries from a dense network, training samples are drawn from networks thinned by minimum-separation thinning, which, unlike random subsampling, reproduces the station spacing of T\"urkiye. We describe the data, the sampling design and the evaluation protocol, which combines point, probabilistic and realism scores with planted fault-slip events, and report three baselines against which the diffusion model will be measured. On held-out stations, the short-period error of a weighted neighbour mean depends little on network density, because the shared short-period signal is dominated by common-mode error coherent over hundreds of kilometres. Adding white and flicker noise fitted to the neighbours yields a well-calibrated generative baseline, with a continuous ranked probability score 26\% below that of the mean alone, but its samples do not reproduce the decrease of inter-station correlation with distance. The diffusion model lowers the score by a further 3--4\% at every density and reproduces the decrease of correlation with distance to within 0.015 in most distance classes, but it generates occasional large departures that make its ensembles too wide in the tails and at long periods.
 \end{abstract}
 
 \begin{keyword}
@@ -143,8 +143,13 @@ California, random & 11--23 & 11--28 & 62--86 & 117--176 \\
 \end{figure}
 
 \subsection{Conditional diffusion model}
+\label{sec:model}
 
-The model follows the EDM formulation of \citet{karras2022edm}. A one-dimensional U-Net over time denoises the target; at every resolution, each time patch attends to tokens of the neighbours for the same patch. The neighbour tokens are produced by a temporal convolution stack shared by all neighbours, with a geometry embedding of the neighbour's offset and distance. Conditioning is dropped for 10\% of training samples to allow classifier-free guidance \citep{ho2022cfg}. Samples of 256-day windows are generated independently, 32 per target and window. The model is being implemented; its design is described here so that the evaluation can be read against it.
+The model follows the EDM formulation of \citet{karras2022edm}. The denoiser is $D(\mathbf{x}; \sigma) = c_\text{skip}(\sigma)\,\mathbf{x} + c_\text{out}(\sigma)\,F(c_\text{in}(\sigma)\,\mathbf{x}, \tfrac14 \ln\sigma; \mathcal{C})$ with the preconditioning of \citet{karras2022edm} and $\sigma_\text{data} = 1$, close to the standard deviation of the detrended, scaled targets (about 0.9). The network $F$ is a one-dimensional U-Net over time with 64, 128, 192 and 256 channels at resolutions $L$, $L/2$, $L/4$ and $L/8$, two residual blocks per level modulated by an embedding of the noise level, and the sine and cosine of the day of year as additional inputs. The neighbours are encoded once per sample, independently of the noise level: a convolution over each neighbour's series, availability and formal errors is followed by one residual block per U-Net resolution, shared by all neighbours and modulated by an embedding of the neighbour's offset and distance (offsets scaled by 100~km, the logarithm of the distance, and sines and cosines of the offsets at wavelengths of 10, 30, 100 and 300~km). After every residual block of the U-Net, each time step of the target attends to the $K$ neighbours at the same time step; a learned null token is always among the keys, so that padded neighbour slots and dropped conditioning are handled alike. Temporal self-attention operates at the two coarsest resolutions. The network has 11.1 million parameters.
+
+Training draws $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$ and minimises the weighted denoising error over the target days with data. The neighbours of 10\% of the samples are dropped, so that the model also learns the unconditional distribution and classifier-free guidance \citep{ho2022cfg} becomes available. We train for 100,000 steps of 64 samples with AdamW, a learning rate of $2 \times 10^{-4}$ with 2,000 warm-up steps and cosine decay, gradient clipping at 1 and bfloat16 arithmetic, and sample from an exponential moving average of the weights (decay 0.999). Samples are drawn by integrating the probability-flow ordinary differential equation with Heun's method over 32 noise levels from 80 to 0.002 ($\rho = 7$); the procedure is deterministic given the initial noise, which is drawn from a seeded generator, as the paired comparisons of experiment B require. On a single RTX 3060 Ti, a training step takes 0.12~s and generating 32 samples for each of about 500 target windows takes 13.7~min.
+
+The regression counterpart, \textbf{regress}, is the same network evaluated with a zero input and noise level and trained for 50,000 steps with the squared error on the target days with data. It is the conditional mean that the diffusion model would reach if it predicted a single value.
 
 \subsection{Baselines}
 \label{sec:baselines}
@@ -186,7 +191,7 @@ The trained model, without further tuning, generates each T\"urkiye station from
 
 \subsection{Baselines on held-out stations}
 
-Table~\ref{tab:a} and Figure~\ref{fig:a} summarise experiment A for the three baselines on the validation period. Of the 173 held-out stations, 154 are scored; the others fail the scoring quality control or have fewer than 20 scored days.
+Table~\ref{tab:a} and Figure~\ref{fig:a} summarise experiment A on the validation period for the three baselines, the regression network and the diffusion model. Of the 173 held-out stations, 154 are scored; the others fail the scoring quality control or have fewer than 20 scored days. We first describe the baselines, which set the reference, and then the trained models.
 
 \begin{table}[t]
 \centering
@@ -211,7 +216,7 @@ Table~\ref{tab:a} and Figure~\ref{fig:a} summarise experiment A for the three ba
 \begin{figure}[t]
 \centering
 \maybefigure{spectra_60km}{\linewidth}
-\caption{Power of single samples relative to the truth by period band, IDW + noise at 60~km density (thinning seed 0); 0 is a perfect match.}
+\caption{Power of single samples relative to the truth by period band, at 60~km density (thinning seed 0); 0 is a perfect match.}
 \label{fig:spectra}
 \end{figure}
 
@@ -220,7 +225,7 @@ Table~\ref{tab:a} and Figure~\ref{fig:a} summarise experiment A for the three ba
 \begin{figure}[t]
 \centering
 \maybefigure{correlation_60km}{0.6\linewidth}
-\caption{Correlation of the short-period parts of target and neighbour against their distance, for the truth and for samples of IDW + noise, at 60~km density (thinning seed 0). Within 10~km there are only 24 pairs at this density.}
+\caption{Correlation of the short-period parts of target and neighbour against their distance, for the truth and for the samples of the two generative methods, at 60~km density (thinning seed 0). Within 10~km there are only 24 pairs at this density.}
 \label{fig:corr}
 \end{figure}
 
@@ -231,10 +236,38 @@ Table~\ref{tab:a} and Figure~\ref{fig:a} summarise experiment A for the three ba
 \label{fig:example}
 \end{figure}
 
+\subsection{The diffusion model and its regression counterpart}
+
+\begin{figure}[t]
+\centering
+\maybefigure{training_curves}{\linewidth}
+\caption{Training curves: the training loss every 100 steps (faint) and its 1,000-step running mean, and the loss on 1,024 fixed validation samples of held-out stations, evaluated with the moving-average weights. The two losses are on different scales.}
+\label{fig:training}
+\end{figure}
+
+\paragraph{Training} The validation loss of the diffusion model fell from 0.666 after 2,000 steps to 0.594 after 20,000 and 0.582 at the end of training, still decreasing slowly as the learning rate decayed (Figure~\ref{fig:training}). The regression network reached its lowest validation error, 0.476, within 10,000 steps and changed by less than 0.2\% thereafter, while its training error kept falling; its conditional mean is learned quickly and the remaining steps fit the training stations.
+
+\paragraph{Accuracy} The regression network is the most accurate point predictor at every density, with a fast nRMSE 1.5--2\% below that of IDW (0.519 against 0.527 with the full network, 0.524 against 0.532 at 60~km). The improvement over a tuned weighted mean is small, consistent with the conclusion of Section~\ref{sec:results} that the predictable short-period signal is dominated by a common mode that a near-uniform average already captures. The mean of 32 diffusion samples is less accurate (0.534 and 0.536), as that of IDW + noise is, because a finite ensemble mean retains part of the sampled variability.
+
+\paragraph{Probabilistic accuracy} The diffusion model has the lowest short-period CRPS at every density: 0.279, 0.281, 0.285 and 0.291 for the full network and for 25, 60 and 100~km, against 0.290, 0.291, 0.293 and 0.301 for IDW + noise, a reduction of 3--4\%. Its energy score over the three components is also the lowest (0.593 against 0.613 at 60~km). At T\"urkiye's density, the target set by the baselines, a short-period CRPS below 0.29, is met (0.285, range 0.284--0.286 over five thinnings).
+
+\paragraph{Calibration} In the short-period part the diffusion samples are close to calibrated in the bulk: the 50\% intervals cover 50--51\% of the truth, and the robust scale of single samples matches that of the truth to within 1--2\% ($\log_2$ ratio 0.004--0.026, against 0.08--0.11 for IDW + noise). The 90\% intervals, however, cover 92.5--93\%, and over the whole series the ensemble spread exceeds the error of the ensemble mean by 21--26\%: the ensemble is too wide in its tails and at long periods.
+
+\paragraph{Spatial structure} Unlike IDW + noise, the diffusion samples reproduce the decrease of inter-station correlation with distance (Figure~\ref{fig:corr}). At 60~km density their correlation with neighbours falls from 0.507 within 10~km to 0.44--0.46 beyond 25~km, against 0.512 and 0.45--0.47 for the truth; at every distance and density the difference from the truth is at most 0.023 and mostly below 0.015, whereas IDW + noise exceeds the truth by 0.03--0.05 beyond 10~km. The model has learned how the shared signal varies with distance, the requirement identified in Section~\ref{sec:results}.
+
+\paragraph{Excess variability} The diffusion samples carry 3--16\% more power than the truth in most period bands (Figure~\ref{fig:spectra}), and 22\% more in the vertical at 64--128 days. Since their robust short-period scale is correct, the excess must come from rare, large departures. The quantiles of the absolute short-period values confirm this for 35 held-out stations at 60~km density: the samples match the truth at the median and the 90th percentile, but their 99.9th percentile is 4.9--6.2 station scales against 3.3--3.8 for the truth (IDW + noise, being Gaussian, reaches only 2.8--2.9). Figure~\ref{fig:example_diffusion} shows the form these departures take: some samples drift slowly by up to 10~mm over months, or jump, without any counterpart in the truth or in the neighbours. Two causes are likely and not mutually exclusive. The training residuals retain the coseismic offsets and postseismic transients of earthquakes in 2008--2019, such as the 2010 El Mayor--Cucapah earthquake, so the model has learned that a station occasionally moves on its own; and the observed series were screened for values beyond five robust standard deviations from a 61-day running median when the data cube was built, whereas the samples were not, which makes the comparison of extremes partly unfair.
+
+\begin{figure}[t]
+\centering
+\maybefigure{example_diffusion}{\linewidth}
+\caption{The same window as Figure~\ref{fig:example}, generated by the diffusion model: eight of 32 samples, their mean, and the truth. Two samples drift in the north component by up to 10~mm over several months and one jumps in the vertical, without counterpart in the truth.}
+\label{fig:example_diffusion}
+\end{figure}
+
 \section{Status and decisions}
 \label{sec:status}
 
-The following decisions departed from the initial plan, each on the evidence given above: minimum-separation thinning replaced random subsampling (Table~\ref{tab:thinning}); a fifth of the training samples retain the full network with no minimum distance, and the minimum distance on thinned networks is drawn from 1--100~km instead of 10--100~km, raising the share of training samples with a neighbour within 5~km from 1\% to 3\%; each window's mean and trend are removed from every series (Table~\ref{tab:drift}); and the classifier test was moved from the baseline stage to the model stage. The remaining work is, in order, the diffusion model and its regression counterpart, experiment B, and the T\"urkiye data cube and experiment C. The baseline results set two concrete targets for the diffusion model: a short-period CRPS below 0.29 at 60~km density, and inter-station correlations that decrease with distance as those of real stations do.
+The following decisions departed from the initial plan, each on the evidence given above: minimum-separation thinning replaced random subsampling (Table~\ref{tab:thinning}); a fifth of the training samples retain the full network with no minimum distance, and the minimum distance on thinned networks is drawn from 1--100~km instead of 10--100~km, raising the share of training samples with a neighbour within 5~km from 1\% to 3\%; each window's mean and trend are removed from every series (Table~\ref{tab:drift}); and the classifier test was moved from the baseline stage to the model stage. The baseline results set two targets for the diffusion model, a short-period CRPS below 0.29 at 60~km density and inter-station correlations that decrease with distance as those of real stations do; the first trained model meets both. Its remaining deficiency is excess variability in rare, large departures, which makes its ensembles too wide in the tails and at long periods. Three remedies are open, and can be compared on the validation period: screening the samples with the same running-median rule as the observations, so that extremes are compared on equal terms; training on residuals from which the estimated earthquake offsets have been removed, as the preceding benchmark did for its learned models; and classifier-free guidance with a weight above 1, which favours content supported by the neighbours over the unconditional prior. The remaining work is then the classifier test of indistinguishability, experiment B, and the T\"urkiye data cube and experiment C.
 
 \bibliographystyle{elsarticle-harv}
 \bibliography{references}

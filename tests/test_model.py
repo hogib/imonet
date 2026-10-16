@@ -118,8 +118,12 @@ def test_train_resume_and_evaluate(tmp_path, kind):
     cube = synthetic_cube()
     cfg = TrainConfig(kind=kind, steps=4, batch=4, val_every=2, val_samples=8, samples_per_epoch=8, workers=0,
                       length=32, net=TINY)
-    out = train("tiny", cfg, cube, tmp_path, log=lambda _: None)
+    lines = []
+    out = train("tiny", TrainConfig(**{**cfg.__dict__, "log_every": 1}), cube, tmp_path, log=lines.append)
     assert (out / "checkpoint.pt").exists() and len((out / "history.json").read_text()) > 10
+    assert sum(line.startswith("step ") for line in lines) == 4
+    assert sum(line.startswith("VAL ") for line in lines) == 2
+    assert len((out / "steps.csv").read_text().splitlines()) == 1 + 4
     train("tiny", TrainConfig(**{**cfg.__dict__, "steps": 6}), cube, tmp_path, log=lambda _: None)
     method = DiffusionMethod(out, n_samples=2, steps=4) if kind == "diffusion" else RegressMethod(out)
     pred = predict(method, cube, component_scale(cube), cube.stations(HELD_OUT)[:2], cube.stations(NORMAL),
