@@ -328,3 +328,81 @@ def variants(split: str, out: Path, root: Path = RESULTS, density: str = "60km",
     path = out / f"{name}.tex"
     path.write_text("\n".join(lines) + "\n")
     return path
+
+
+# The diffusion models and the GP with and without the target's noise level:
+# one colour per model family, line style for the mode.
+NOISE_MODELS = (
+    ("diffusion", "diffusion v1", {"linestyle": (0, (1, 1.5)), "markerfacecolor": "white"}),
+    ("diffusion-v2-unknown", "diffusion v2, level unknown", {}),
+    ("diffusion-v2-given", "diffusion v2, level given", {"marker": "o"}),
+    ("gp", "GP, level unknown", {}),
+    ("gp-given", "GP, level given", {"marker": "o", "linestyle": (0, (4, 2))}),
+)
+NOISE_MODEL_COLS = (("crps_fast", "CRPS$_f$"), ("nrmse_fast", "nRMSE$_f$"), ("cover90_fast", "Cov.$_{90,f}$"),
+                    ("spread_skill", "S/E"), ("spread_skill_pooled", "S/E$_\\mathrm{pool}$"),
+                    ("spread_skill_q1", "S/E$_{Q1}$"), ("spread_skill_q4", "S/E$_{Q4}$"))
+
+
+def _family_style(name: str, label: str, extra: dict) -> dict:
+    base = "gp" if name.startswith("gp") else "diffusion"
+    return method_style(base) | {"label": label} | extra
+
+
+def calibration_by_noise_models(df: pd.DataFrame, out: Path, density: str = "60km") -> Path | None:
+    """Spread/error and 90% coverage by the held-out station's noise
+    quartile, for the diffusion models and the GP with and without the
+    target's noise level; mean over the thinning seeds."""
+    d = df[df.density == density]
+    present = [(m, lab, ex) for m, lab, ex in NOISE_MODELS if m in set(d.method)]
+    if not present or "spread_skill_q1" not in d:
+        return None
+    noise = d[[f"noise_q{q}" for q in range(1, 5)]].dropna().iloc[0].to_numpy()
+    ticks = [f"Q{q}\n{n:.2f}" for q, n in zip(range(1, 5), noise)] + ["all\npooled"]
+    with plt.rc_context(STYLE):
+        fig, axes = plt.subplots(1, len(NOISE_PANELS), figsize=(WIDTH, 2.7))
+        for ax, (col, title, ideal) in zip(axes, NOISE_PANELS):
+            for m, lab, ex in present:
+                g = d[d.method == m]
+                st = _family_style(m, lab, ex)
+                ax.plot(range(4), g[[f"{col}_q{i}" for i in range(1, 5)]].mean(), **st)
+                ax.plot([4.6], [g[f"{col}_pooled"].mean()], color=st["color"], marker=st["marker"],
+                        markerfacecolor=SURFACE, linestyle="none")
+            ax.axhline(ideal, color=INK_2, lw=0.8, ls=(0, (1, 2)))
+            ax.axvline(3.8, color=BASELINE, lw=0.6)
+            ax.set_xticks([0, 1, 2, 3, 4.6], ticks, fontsize=7)
+            ax.set_xlim(-0.3, 4.9)
+            ax.set_title(title, fontsize=8)
+            ax.margins(y=0.2)
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=7, bbox_to_anchor=(0.5, -0.01))
+        fig.tight_layout(rect=(0, 0.14, 1, 1))
+        return save(fig, out, f"calibration_noise_models_{density}")
+
+
+def noise_models_table(df: pd.DataFrame, out: Path, name: str = "noise_models_table") -> Path | None:
+    """The models of `calibration_by_noise_models` at full density and 60 km,
+    mean over thinning seeds, as a LaTeX tabular."""
+    present = [(m, lab) for m, lab, _ in NOISE_MODELS if m in set(df.method)]
+    if not present:
+        return None
+    cols = [(c, h) for c, h in NOISE_MODEL_COLS if c in df]
+    lines = [r"\begin{tabular}{ll" + "r" * len(cols) + "}", r"\toprule",
+             "Density & Model & " + " & ".join(h for _, h in cols) + r" \\", r"\midrule"]
+    for i, dens in enumerate(("full", "60km")):
+        sub = df[df.density == dens]
+        if i:
+            lines.append(r"\addlinespace")
+        first = True
+        for m, lab in present:
+            g = sub[sub.method == m]
+            if g.empty:
+                continue
+            vals = [f"{g[c].mean():.3f}" if g[c].notna().any() else "--" for c, _ in cols]
+            lines.append(f"{dens.replace('km', '~km') if first else ''} & {lab} & " + " & ".join(vals) + r" \\")
+            first = False
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{name}.tex"
+    path.write_text("\n".join(lines) + "\n")
+    return path

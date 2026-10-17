@@ -97,3 +97,42 @@ def compare(a: str, b: str, score: str = "crps_fast", split: str = "validation",
             "a_value": headline(xa), "b_value": headline(xb), "difference": diff,
             "relative": diff / headline(xb), "ci_low": float(lo), "ci_high": float(hi),
             "a_better_stations": wins, "compared_stations": n, "sign_p": binomial_two_sided(wins, n)}
+
+
+DENSITY_ORDER = ("full", "25km", "60km", "100km")
+TABLE_PAIRS = (("diffusion", "idw+noise"), ("diffusion", "krige+noise"), ("diffusion", "gp"),
+               ("diffusion-v2-given", "gp-given"))
+LABELS = {"diffusion": "diffusion", "idw+noise": "IDW + noise", "krige+noise": "kriging + noise",
+          "gp": "GP", "diffusion-v2-given": "diffusion v2 (given)", "gp-given": "GP (given)"}
+
+
+def table(out: Path, split: str = "validation", root: Path = RESULTS, score: str = "crps_fast",
+          name: str = "significance_table") -> Path | None:
+    """Paired comparisons as a LaTeX tabular, one row per comparison and
+    density: relative difference of the summaries (%), its 95% bootstrap
+    interval, and the stations where the first method is better."""
+    lines = [r"\begin{tabular}{llrcr}", r"\toprule",
+             r"Comparison & Density & Difference (\%) & 95\% interval & Stations \\", r"\midrule"]
+    any_row = False
+    for k, (a, b) in enumerate(TABLE_PAIRS):
+        first = True
+        for d in DENSITY_ORDER:
+            try:
+                r = compare(a, b, score, split, d, root)
+            except (FileNotFoundError, ValueError):
+                continue
+            if first and any_row:
+                lines.append(r"\addlinespace")
+            base = r["b_value"]
+            label = f"{LABELS.get(a, a)} vs {LABELS.get(b, b)}" if first else ""
+            lines.append(f"{label} & {d.replace('km', '~km')} & ${100 * r['relative']:+.1f}$ & "
+                         f"[${100 * r['ci_low'] / base:+.1f}$, ${100 * r['ci_high'] / base:+.1f}$] & "
+                         f"{r['a_better_stations']}/{r['compared_stations']} \\\\")
+            first, any_row = False, True
+    if not any_row:
+        return None
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{name}.tex"
+    path.write_text("\n".join(lines) + "\n")
+    return path

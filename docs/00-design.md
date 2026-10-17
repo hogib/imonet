@@ -544,8 +544,22 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
     spread/error 1.11–1.18 (a residual long-period excess).
   `summarise` now reports pooled calibration and calibration by noise
   quartile; `imonet rescore` recomputes summaries from stations.csv.
-- Conditioning on the virtual station's noise level (§4.4): implemented
-  2026-10-16, `diffusion-v2` to train. Success: spread/error flat across
-  noise quartiles (±0.1) and fast 90% coverage 0.88–0.93 per quartile with
-  the level given, fast CRPS below v1's 0.285 at 60 km; with it unknown,
-  CRPS within 0.003 of v1; neighbour correlation within 0.015 either way.
+- Conditioning on the virtual station's noise level (§4.4): `diffusion-v2`
+  trained 2026-10-16 (val loss 0.582, as v1). Given the level: spread/error
+  0.96–1.14 across noise quartiles (v1 1.46→0.97), fast 90% coverage
+  0.90–0.92 per quartile, tail log2 0.04 (v1 0.27), PSD 64–128 d excess
+  gone, CRPS 0.278/0.283 (full/60 km) against v1 0.279/0.285. Unknown:
+  CRPS as v1 (paired −0.2/−0.4%, n.s.), better calibrated (S/E 1.12 vs
+  1.23). The GP given the same level gains little. Criteria met except the
+  noisiest quartile leaning wide (1.11–1.14).
+- Experiment B (2026-10-17, validation, existing models, no transient
+  augmentation): 60 events (30 slow slip, footprint ~9 km; 30 afterslip,
+  ~53 km), `imonet eval-b`, results in runs/B. Nothing is transferred
+  unless footprint > ~2× the gap to the nearest station; slow slip is
+  invisible at every density, afterslip at ≥ 60 km. Where footprint > 4×
+  that gap: GP median ρ 0.86, regress 0.63, diffusion v2 0.58, idw/krige
+  0.55–0.56. Diffusion keeps the lowest CRPS during events. Ridgecrest
+  (13 held-out stations ≥ 5 mm): full network averages/GP recover 1.0–1.1
+  of the offsets (GP error 2.7 mm), diffusion 0.53–0.64; only diffusion
+  ensembles cover them (54–77% in the 90% range vs 8–19%). Open decision
+  (user): train with planted synthetic transients (§4.3) before B again.
