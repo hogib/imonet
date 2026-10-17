@@ -57,6 +57,8 @@ def main(argv: list[str] | None = None) -> None:
                    help="condition on the target station's noise level (optional input, see model/net.py)")
     t.add_argument("--noise-drop", type=float, default=TrainConfig.noise_drop,
                    help="share of training samples with the noise level hidden")
+    t.add_argument("--transients", type=float, default=TrainConfig.transient_p, metavar="P",
+                   help="share of training samples drawn with a synthetic transient (docs/00-design.md §4.3)")
 
     b = sub.add_parser("eval-b", help="experiment B: planted fault-slip events")
     b.add_argument("method", choices=["zero", "idw", "idw+noise", "krige", "krige+noise", "gp", "diffusion", "regress"])
@@ -144,7 +146,7 @@ def main(argv: list[str] | None = None) -> None:
         from dataclasses import replace
         from imonet.model.net import NetConfig
         cfg = TrainConfig(kind=a.kind, steps=a.steps, batch=a.batch, lr=a.lr, log_every=a.log_every, val_every=a.val_every,
-                          workers=a.workers, seed=a.seed, noise_drop=a.noise_drop,
+                          workers=a.workers, seed=a.seed, noise_drop=a.noise_drop, transient_p=a.transients,
                           net=replace(NetConfig(), station_noise=a.station_noise))
         root = a.results / "models"
         log_path = root / a.name / "train.log"

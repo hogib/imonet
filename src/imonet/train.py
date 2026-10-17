@@ -10,7 +10,11 @@ A model lives in runs/models/<name>/:
 The EMA weights are the model: they are what evaluation samples from. The
 validation loss uses fixed samples (held-out stations, validation days)
 and, for the diffusion model, fixed noise at fixed noise levels, so it is
-comparable across steps.
+comparable across steps. A model trained with planted transients
+(`transient_p`, docs/00-design.md §4.3) also gets a second validation loss
+on the same kind of samples with a transient planted wherever the
+neighbours see one (`val_planted_loss`), and its log shows the share of
+training samples that carried one.
 """
 
 from __future__ import annotations
@@ -57,6 +61,7 @@ class TrainConfig:
     length: int = WINDOW_DAYS          # days per window
     compile: bool = True               # torch.compile on GPU: about 2× faster (memory-bound cross-attention)
     noise_drop: float = 0.3            # share of samples whose target noise level is hidden (net.station_noise)
+    transient_p: float = 0.0           # share of samples drawn with a synthetic transient (imonet.transients)
     net: NetConfig = field(default_factory=NetConfig)
     edm: EDMConfig = field(default_factory=EDMConfig)
 
@@ -133,10 +138,16 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
     log(f"{name}: {cfg.kind}, {n_params(net) / 1e6:.1f} M parameters, device {device}")
 
     noise_log = station_noise_log(cube)
-    train_ds = training_windows(cube, scale, cfg.samples_per_epoch, cfg.seed, length=cfg.length, noise_log=noise_log)
+    train_ds = training_windows(cube, scale, cfg.samples_per_epoch, cfg.seed, length=cfg.length, noise_log=noise_log,
+                                transient_p=cfg.transient_p)
     val_ds = validation_windows(cube, scale, cfg.val_samples, cfg.seed + 1000, length=cfg.length,
                                 noise_log=noise_log)
     val_loader = DataLoader(val_ds, batch_size=cfg.batch, num_workers=cfg.workers)
+    planted_loader = None
+    if cfg.transient_p:
+        planted_ds = validation_windows(cube, scale, cfg.val_samples, cfg.seed + 1000, length=cfg.length,
+                                        noise_log=noise_log, transient_p=1.0)
+        planted_loader = DataLoader(planted_ds, batch_size=cfg.batch, num_workers=cfg.workers)
     g = torch.Generator(device=device)
     g.manual_seed(cfg.seed * 7919 + step)
 
@@ -150,6 +161,7 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
     per_epoch = cfg.samples_per_epoch // cfg.batch
     t0, run_loss, run_n = time.time(), 0.0, 0
     t_log, log_loss, log_grad, log_n, t_start = time.time(), 0.0, 0.0, 0, time.time()
+    log_planted = 0.0
     while step < cfg.steps:
         train_ds.set_epoch(step // (cfg.samples_per_epoch // cfg.batch))
         loader = DataLoader(train_ds, batch_size=cfg.batch, num_workers=cfg.workers, shuffle=False,
@@ -160,6 +172,7 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
                 continue                                  # resumed mid-epoch
             if step >= cfg.steps:
                 break
+            log_planted += batch["planted"].float().mean().item()
             b = to_torch(batch, device)
             b = drop_condition(b, cfg.edm.cond_drop, g) if cfg.kind == "diffusion" else b
             b = drop_station_noise(b, cfg.noise_drop, g) if cfg.net.station_noise else b
@@ -187,20 +200,24 @@ def train(name: str, cfg: TrainConfig, cube: Cube, root: Path = MODELS, log=prin
                 epoch = step / per_epoch
                 log(f"step {step:7d}  epoch {epoch:6.2f}  loss {log_loss / log_n:.4f}  "
                     f"grad {log_grad / log_n:.3f}  lr {lr_at(step):.2e}  {rate:.1f} steps/s  "
-                    f"eta {int(eta // 3600)}h{int(eta % 3600 // 60):02d}m")
+                    f"eta {int(eta // 3600)}h{int(eta % 3600 // 60):02d}m"
+                    + (f"  planted {log_planted / log_n:.2f}" if cfg.transient_p else ""))
                 with open(steps_csv, "a") as fh:
                     fh.write(f"{step},{epoch:.4f},{log_loss / log_n:.6f},{log_grad / log_n:.6f},"
                              f"{lr_at(step):.6e},{rate:.3f},{time.time() - t_start:.1f}\n")
-                t_log, log_loss, log_grad, log_n = time.time(), 0.0, 0.0, 0
+                t_log, log_loss, log_grad, log_n, log_planted = time.time(), 0.0, 0.0, 0, 0.0
 
             if step % cfg.val_every == 0 or step == cfg.steps:
                 rate = run_n / (time.time() - t0)                 # training only, before validating
                 val = validation_loss(ema_model, val_loader, device, cfg.kind)
                 row = {"step": step, "train_loss": run_loss / max(run_n, 1), "val_loss": val,
                        "lr": lr_at(step), "steps_per_s": round(rate, 2)}
+                if planted_loader is not None:
+                    row["val_planted_loss"] = validation_loss(ema_model, planted_loader, device, cfg.kind)
                 history.append(row)
                 log(f"VAL  step {step:7d}  epoch {step / per_epoch:6.2f}  train {row['train_loss']:.4f}  "
-                    f"val {val:.4f}  lr {row['lr']:.2e}  {rate:.1f} steps/s")
+                    f"val {val:.4f}" + (f"  val planted {row['val_planted_loss']:.4f}" if planted_loader else "")
+                    + f"  lr {row['lr']:.2e}  {rate:.1f} steps/s")
                 torch.save({"net": net.state_dict(), "ema": ema.state_dict(), "opt": opt.state_dict(),
                             "step": step}, ckpt)
                 (out / "history.json").write_text(json.dumps(history, indent=1))

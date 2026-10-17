@@ -29,6 +29,7 @@ A sample is a dict of numpy arrays, ready for torch's default collate:
 | `target_noise` | 3 float32 | target station's log noise level per component (`station_noise_log`), 0 if unknown |
 | `target_noise_ok` | bool | the target's noise level is known |
 | `spacing_km`, `min_km` | float32 | network spacing and minimum target distance drawn |
+| `planted` | bool | a synthetic transient was planted (`transients`, training only) |
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from __future__ import annotations
 import numpy as np
 from torch.utils.data import Dataset
 
+from imonet import transients
 from imonet.cube import HELD_OUT, NORMAL, TRAIN, VALIDATION, Cube, pairwise_km
 from imonet.metrics import station_noise_log
 from imonet.network import K_NEIGHBOURS, MAX_NEIGHBOUR_KM, neighbours, spacing_km, thin
@@ -171,7 +173,9 @@ class Windows(Dataset):
     """Random samples: a target station from `targets`, a window inside the
     days of `split` where the target has at least `min_target_fraction` of
     its days in `ok`, a thinned copy of `network` (without the target), and
-    a minimum target distance (none on the unthinned network).
+    a minimum target distance (none on the unthinned network). With
+    probability `transient_p` the sample gets a synthetic transient
+    (`transients`), drawn after the sample itself.
 
     Sample i of epoch e is drawn from a generator seeded with (seed, e, i),
     so a sample does not depend on worker count or order.
@@ -185,11 +189,12 @@ class Windows(Dataset):
         ok: np.ndarray, n_samples: int, seed: int, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS,
         spacing_range: tuple[float, float] = SPACING_KM, min_km: tuple[float, float] = MIN_KM,
         min_target_fraction: float = MIN_TARGET_FRACTION, bank: ThinningBank | None = None,
-        noise_log: np.ndarray | None = None,
+        noise_log: np.ndarray | None = None, transient_p: float = 0.0,
     ):
         self.cube, self.scale, self.ok = cube, np.asarray(scale, dtype=np.float32), ok
         self.noise_log = station_noise_log(cube) if noise_log is None else noise_log
         self.n_samples, self.seed, self.epoch = n_samples, seed, 0
+        self.transient_p = transient_p
         self.length, self.k, self.min_km = length, k, min_km
         self.bank = bank or ThinningBank(cube, network, np.random.default_rng((seed, 1)), spacing_range)
 
@@ -228,7 +233,23 @@ class Windows(Dataset):
         out |= target(c, self.scale, s, t0, self.ok, self.length)
         out |= {"target": s, "t0": t0, "doy0": np.float32(day_of_year(c.days[t0])),
                 "spacing_km": np.float32(spacing), "min_km": np.float32(min_km)}
-        return out | target_noise(self.noise_log, s)
+        out |= target_noise(self.noise_log, s) | {"planted": np.bool_(False)}
+        if self.transient_p and rng.random() < self.transient_p:
+            self.plant(out, transients.draw(rng, self.length))
+        return out
+
+    def plant(self, out: dict, tr: transients.Transient) -> None:
+        """Add transient tr to sample `out` in place, if enough neighbours
+        see it. Detrending is linear, so the detrended transient is added
+        to the detrended series."""
+        v, length = out["valid"], self.length
+        sig = tr.signal(out["geom"][v, 0], out["geom"][v, 1], length)       # m×L×3 mm
+        if transients.seen(sig, out["y_ok"][v]).sum() < transients.MIN_SEEN:
+            return
+        out["y"][v] += detrend(sig / self.scale, out["y_ok"][v])
+        own = tr.signal(np.zeros(1), np.zeros(1), length)[0]
+        out["x"] += detrend(own / self.scale, out["x_ok"])
+        out["planted"] = np.bool_(True)
 
 
 def training_windows(cube: Cube, scale: np.ndarray, n_samples: int, seed: int, **kw) -> Windows:

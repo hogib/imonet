@@ -172,18 +172,31 @@ California's training years hold few transients, and the Ridgecrest window
 is excluded. A model trained on them alone would learn that neighbours carry
 only shared noise and would not pass on signal localised in space.
 
-With probability p (to be tuned, starting at 0.5) a sample gets one planted
-transient, written into the target and every station in the network:
+With probability p a training sample is drawn with one planted transient
+(`imonet.transients`, `train --transients P`), written into the target and
+every neighbour before the per-window detrending:
 
-- Gaussian spatial footprint, 10–300 km;
-- amplitude 1–30 mm, random horizontal direction, random vertical share;
-- raised-cosine rise over 5–120 days, held to the window end or reversed;
-- a share of them as offsets (rise of one day) with heavy-tailed amplitudes,
-  so that the model also learns to pass on coseismic steps.
+- Gaussian spatial footprint, radius (σ) 10–300 km log-uniform, centred
+  within 1.5 radii of the target, so the target is inside, at the edge or
+  outside;
+- half one direction everywhere (random azimuth, vertical share ±0.5), half
+  radial (away from or toward the centre, peak A at one radius, vertical
+  ±A), so direction varies over the network;
+- 70% slow: raised-cosine rise over 5–120 days, 1–30 mm, 30% of them
+  reversing over 1–3 times the rise; 30% steps (one-day rise), Pareto
+  (α 1.5) from 1 mm, capped at 50 mm. Onset from a quarter-window before
+  the window to its end;
+- visibility guard: kept only if ≥ 2 neighbours see a range ≥ 1 mm over
+  their available days, else the sample stays clean (no unpredictable
+  transients at the target). About 39% of attempts fail it on California, so
+  p = 0.5 gives 31% planted samples.
 
 This family is deliberately simpler than the fault-slip events of
 experiment B (§6.2). B then tests generalisation to realistic events rather
-than recall of the training family.
+than recall of the training family. The model trained this way is
+`diffusion-v3` (v2's configuration plus transients, same steps and seed),
+with `regress-v2` its regression counterpart; both also log a validation
+loss on held-out windows with planted transients.
 
 ### 4.4 Model
 
