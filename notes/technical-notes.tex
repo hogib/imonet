@@ -1,0 +1,335 @@
+% Technical notes for imonet: what was done, how, with which numbers, and why.
+% Build: cd notes && tectonic technical-notes.tex   (or pdflatex)
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{iftex}
+\ifTUTeX
+  \usepackage{fontspec}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+\fi
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,xltabular,array}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=*}
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+\setlength{\emergencystretch}{2em}
+
+% Result tables are the files the code generates for the report, so the
+% numbers here are always the report's.
+\newcommand{\resulttable}[1]{\begin{center}\scriptsize\setlength{\tabcolsep}{3pt}\input{../paper/figures/#1.tex}\end{center}}
+% Setting / value / reason tables
+\newenvironment{settings}{\small\setlength{\LTpre}{0.5em}\setlength{\LTpost}{0.5em}\xltabular{\linewidth}{>{\raggedright\arraybackslash}p{0.25\linewidth}>{\raggedright\arraybackslash}p{0.19\linewidth}>{\raggedright\arraybackslash}X}\toprule Setting & Value & Why \\ \midrule\endhead}{\bottomrule\endxltabular}
+
+\title{imonet: technical notes\\[0.3em]\large What was done, how, with which numbers, and why}
+\author{H. Oğuz Bolat}
+\date{Status of 19 October 2026}
+
+\begin{document}
+\maketitle
+
+\noindent These notes list every method, setting and result of the study with the reason behind it. They are a reference, not a paper: the argument and the literature are in \texttt{paper/report.tex}, the plan and its changes in \texttt{docs/00-design.md}, and every number below comes from the code (\texttt{src/imonet/}) or from the run outputs (\texttt{runs/}). Where a value is a standard default that was not tuned, this is said.
+
+\tableofcontents
+
+% ======================================================================
+\section{The task in one paragraph}
+
+A virtual GNSS station is a daily east/north/up residual series generated at a location where there is no station, from the real stations around it. The model receives the 16 nearest stations' series over a 256-day window and their positions relative to the target, and returns samples of the target's series. Many samples describe the uncertainty. It is trained and validated in California, where real stations can be hidden and compared with their generated versions, and tested without retraining in Türkiye, whose network is about six times sparser.
+
+\textbf{Why generate samples rather than predict one series:} a station's residuals are a part shared with its neighbours (common-mode error, loading, tectonic signal) plus a part of its own (monument and site noise). The second part cannot be predicted from other stations. A single prediction can only be the shared part, so it would be too smooth and too quiet. A generator can take the shared part from the neighbours and draw the station's own part from a learned distribution.
+
+\textbf{Terms used below.}
+\begin{itemize}
+\item \emph{Residual}: position minus a fitted trajectory (Section~\ref{sec:data}).
+\item \emph{Fast part}: residual minus its 61-day running median (periods shorter than about two months); \emph{slow part}: the running median.
+\item \emph{Held-out stations}: California stations never used in training, only as evaluation targets.
+\item \emph{Density}: median distance from a station to its nearest neighbour in a (thinned) network.
+\end{itemize}
+
+% ======================================================================
+\section{Data}
+\label{sec:data}
+
+\subsection{Source}
+
+Daily IGS20 solutions of the Nevada Geodetic Laboratory (NGL), downloaded with \texttt{imonet fetch}: the station table and step catalogue (snapshot of 6 October 2026) and one \texttt{.tenv3} file per station. NGL processes every station with one strategy, so stations are comparable.
+
+\begin{settings}
+California stations & box 32.4–42.1°N, 124.6–114.0°W, $\geq$ 1,095 daily solutions; 1,381 stations & The box and the 3-year minimum are those of the preceding benchmark (gnssdl), so the data are identical to it; 3 years leave enough data for a trajectory fit. \\
+Türkiye stations & box 35.8–42.2°N, 25.6–44.9°E, $\geq$ 365 solutions; 233 stations & Türkiye is only tested on, so short records still help as neighbours. The box includes stations in neighbouring countries; they are targets too, with Türkiye-only scores reported separately. \\
+Country of a station & Natural Earth 1:10m polygons (v5.1.2); within 20 km of a coast: nearest country & Needed for the Türkiye-only scores. The 20 km rule assigns two Marmara islets that the polygons omit. \\
+\end{settings}
+
+\subsection{From positions to residuals (\texttt{imonet build})}
+
+For each station and component a trajectory is fitted by least squares and subtracted:
+\[ x(t) = a + v\,t + \textstyle\sum_{k=1}^{2}\big[c_k \sin(2\pi k t) + d_k \cos(2\pi k t)\big] + \sum_j b_j\,H(t - t_j) . \]
+
+\begin{settings}
+Start of the data & 2008-01-01 & Inherited from the preceding benchmark, so that the California data match it; not revisited. \\
+Fit window, California & to 2019-12-31 & The validation (2020–21) and test (2022+) days must lie outside the fit, or the residuals there would be too good. \\
+Fit window, Türkiye & to 2012-12-31 & NGL holds Türkiye's national network densely only in 2009–2015. Fitting to 2012 leaves 2013–2015 as dense days outside the fit (Section~\ref{sec:c}). \\
+Steps & estimated if $\geq$ 30 days of fit data on each side & Fewer days cannot separate a step from noise. \\
+Earthquake steps & estimated, then \emph{kept} in the residual & Coseismic offsets are real, spatially coherent signal that a virtual station should reproduce. They are estimated so that they do not bias the velocity. \\
+Equipment steps & removed; after the fit window by the median jump over 30 days either side ($\geq$ 5 days each) & Antenna changes are not signal. After the fit window they cannot be estimated by the fit, hence the local jump. \\
+Too little data before the fit end & fit on the first 730 days or 365 epochs instead (“fallback”) & Keeps the station, but its fit then overlaps later days: such stations are held out in California and left out of the Türkiye scores. \\
+Outlier screening & days > 5 robust $\sigma$ from a 61-day running median removed & Removes single bad days without touching signal that lasts longer than a few days. Thresholds inherited from the benchmark. \\
+Station quality & dropped if robust scale of fit residuals > 10 mm (horizontal) or 30 mm (vertical) & Removes subsiding or unstable stations whose residuals are not GNSS noise. Thresholds inherited from the benchmark. \\
+Twins & of stations closer than 1 km, keep the one with most data & Co-located pairs would make prediction trivially easy. \\
+\end{settings}
+
+\textbf{Result.} California: 1,251 of 1,381 stations kept (30 too short, 22 failed quality, 78 twins), 6,844 days, 75\% of station-days available, 2,577 earthquake offsets kept. Türkiye (fit to 2012): 207 of 233 kept (3/5/18), 176 in Türkiye. Rebuilt with this project's code from the same files, the California data are identical, array by array, to the benchmark's.
+
+\subsection{Splits and exclusions}
+
+\begin{settings}
+California held-out stations & 173: 10\% spread by farthest-point sampling (seed 0), plus every fallback-fit station & Spreading them covers the whole network; fallback stations must not be trained on because their fit overlaps the scored days. \\
+Held-out rule & never a training target, never a neighbour, never in a training network & Any use would leak the answer into training. \\
+Days & train 2008–2019, validation 2020–2021, test 2022+ & Decisions on validation only; the test period is scored once, at the end. \\
+Ridgecrest exclusion & stations within 150 km of (35.77°N, 117.60°W), 2019-07-01 to 2020-06-30 & Keeps the 2019 earthquakes out of training, so that they can be used as a real test (experiment B). \\
+Kahramanmaraş window & 2023-01-07 to 2024-02-05, all Türkiye stations & Metre-scale offsets; kept out of the main Türkiye scores and reserved for a separate case study. \\
+\end{settings}
+
+\subsection{Windows, detrending and scaling}
+
+\begin{settings}
+Window length & 256 days & Long enough for slow signals of a few months; a power of two, so the U-Net can halve it three times; short enough to give many training windows. Longer windows are an open question. \\
+Mean and trend & removed per window from every series (target and neighbours, truth and samples) & In the validation and test years, residuals carry the extrapolation error of the trajectory (an offset and a drift). After removing each window's mean and line the two periods are statistically indistinguishable (report, Table~1); removing the mean alone is not enough for the vertical. The trajectory itself is out of scope. \\
+Scale & divide E, N, U by 2.12, 2.24, 5.60 mm & The robust scale (1.4826 $\times$ median absolute deviation) of the training data. Standard deviations (9.1, 15.3, 10.3 mm) are dominated by a few earthquake offsets, so they would be a poor unit. \\
+Usable target window & $\geq$ 50\% of its days with data & Fewer days give too weak a training signal. \\
+Usable neighbour & $\geq$ 25\% of the window with data & No neighbour slot is spent on a station that is down. \\
+\end{settings}
+
+% ======================================================================
+\section{Networks and neighbours}
+
+\begin{settings}
+Neighbours per target & 16 nearest within 300 km & Enough to average the common mode, small enough for memory; 300 km covers sparse networks. Not tuned. \\
+Thinning method & greedy minimum-separation (“disk”) thinning, separation by bisection to reach the target density & Random subsampling keeps California's clustering: thinned to 60 km it leaves 11–23 stations with gaps over 100 km. Disk thinning leaves 110–118 stations and matches Türkiye's median (60 km) and upper tail (77 km). \\
+Training densities & 80\% of samples thinned to 10–100 km (log-uniform); 20\% the full network & The model must handle sparse networks, but must also see close neighbours (13\% of held-out stations have one within 5 km), which thinning removes. \\
+Training dead zone & on thinned samples, stations within 1–100 km of the target removed (log-uniform) & Stops the model relying on one close station; a virtual station is placed where there is none. (First 10–100 km; lowered because it left only 1\% of samples with a neighbour within 5 km.) \\
+Thinning bank & 64 densities $\times$ 4 seeds, precomputed & One thinning takes up to 0.1 s, too slow per sample. \\
+Evaluation densities & full, 25, 60, 100 km; 5 thinning seeds each & 60 km matches Türkiye and is the main California result; repeated seeds show the network's own randomness. \\
+\end{settings}
+
+% ======================================================================
+\section{The model}
+\label{sec:model}
+
+\subsection{Diffusion in brief}
+
+Training adds Gaussian noise of a random strength $\sigma$ to a real window and teaches the network to recover the window, given the neighbours. Generating starts from pure noise and removes it step by step (an ordinary differential equation solved with Heun's method), so each run from a different starting noise gives a different plausible series. The recipe (preconditioning, noise distribution, loss weights, sampler) is EDM \cite{karras}; its values are kept as published unless stated.
+
+\begin{settings}
+$\sigma_\text{data}$ & 1 & The scaled, detrended targets have a standard deviation of about 0.9. \\
+Training noise & $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$ & EDM default. \\
+Loss & weighted denoising error over the target's days with data & EDM weighting; missing days carry no information. \\
+Sampler & Heun, 32 steps, $\sigma$ 80 $\to$ 0.002, $\rho = 7$ & EDM's sampler and range; the number of steps was not tuned. Deterministic given the starting noise, which makes paired comparisons possible (experiment B). \\
+Samples per target & 32 (experiment A), 16 (B), 1 (classifier test) & 32 resolve 90\% intervals; B compares sample \emph{means} of paired runs, for which 16 suffice; the classifier test needs one per window. \\
+\end{settings}
+
+\subsection{Network}
+
+\begin{settings}
+Neighbour encoder & per neighbour: convolution over its series, availability and formal $\sigma$ (7 inputs); one residual block per resolution & Computed once per window, independent of the noise level, so sampling reuses it. \\
+Neighbour position & offsets/100 km, log distance, sines and cosines of the offsets at 10, 30, 100, 300 km; modulates the encoder & Only offsets relative to the target, never absolute coordinates, so a model trained in California can run in Türkiye. Several wavelengths let it sense direction and distance at several scales. \\
+Denoiser & 1-D U-Net over time, 64/128/192/256 channels, 2 residual blocks per level, day-of-year sine and cosine as inputs & Coarser levels see longer periods; the season enters through the day of year. \\
+Linking target and neighbours & cross-attention after every block: each day of the target attends to the 16 neighbours on the same day (4 heads), plus a learned “null” neighbour & The network learns which neighbours to listen to and how much; the null token handles missing neighbours. \\
+Self-attention & bottleneck and two coarsest levels & Relates distant days of the window. \\
+Size & 11.1 M parameters & Fits training in about 4 h on one RTX 3060 Ti (8 GB). \\
+Conditioning dropout & all neighbours dropped from 10\% of samples & Allows classifier-free guidance (tested, not used: Section~\ref{sec:dead}). \\
+\end{settings}
+
+\subsection{Training}
+
+\begin{settings}
+Optimiser & AdamW, lr $2\cdot10^{-4}$, 2,000 warm-up steps, cosine decay & Standard settings; not tuned. \\
+Length, batch & 100,000 steps of 64 windows ($\approx$ 4 h) & Fits one overnight run. The validation loss changed by at most 0.0002 over the last 20,000 steps (e.g.\ v3: 0.5809 at 80k, 0.5811 at 100k), so longer training would gain little. \\
+Stability & gradient clipping at 1; bfloat16; weights averaged (EMA 0.999), the average is the model used & Standard for diffusion training. \\
+Validation & every 2,000 steps on 1,024 fixed held-out windows, at fixed noise levels (0.02 to 10) and fixed noise & Comparable from step to step. \\
+\end{settings}
+
+\subsection{Model versions}
+
+\begin{settings}
+diffusion v1 & as above & First model. Validation loss 0.582. \\
+diffusion v2 & + the target station's noise level as an optional input (4 numbers $\to$ small network $\to$ added to the noise embedding; zero at start; hidden in 30\% of samples) & v1's samples were too wide at quiet stations and too narrow at noisy ones: the neighbours do not reveal how noisy a station is, so the model hedged. Hiding it in 30\% keeps a model that works without it. Validation loss 0.582. \\
+diffusion v3 (carried forward) & v2 + planted synthetic transients (Section~\ref{sec:transients}) & v1 and v2 passed on little of localised signal (experiment B). Validation loss 0.581. \\
+regress v1 / v2 & the same network trained with squared error, one output, 50,000 steps; v2 with v3's training data & Shows what the generative formulation adds beyond its own best single prediction. Validation error flattened within 10,000 steps. \\
+\end{settings}
+
+\subsection{Planted transients (v3)}
+\label{sec:transients}
+
+California's training years hold few localised transients, so the first models learned that what neighbours share is noise. In training, half of the samples get one synthetic transient, added to the target and all neighbours as one coherent event.
+
+\begin{settings}
+Probability & 0.8 attempted, $\approx$ 49\% of samples kept & 39\% of attempts fail the visibility rule below; 0.8 gives the intended half. \\
+Footprint & Gaussian, radius 10–300 km (log-uniform), centre within 1.5 radii of the target & Small to regional events; the target is inside, at the edge or outside, so the model also learns what \emph{not} to copy. \\
+Pattern & half one direction everywhere, half radial (away from or toward the centre) & Radial patterns make neighbours move in different directions, as real deformation does. \\
+Time & 70\% slow rises over 5–120 days (1–30 mm), 30\% of those reverse; 30\% steps (Pareto, $\alpha$ = 1.5, 1–50 mm) & Slow slip, postseismic-like ramps and earthquake-like steps. \\
+Visibility rule & kept only if $\geq$ 2 neighbours change by $\geq$ 1 mm & A transient no neighbour shows cannot be predicted; training on it would teach the model to invent excursions. \\
+Simplicity & no fault physics & On purpose: experiment B uses fault-slip events, so it tests generalisation rather than recall. \\
+\end{settings}
+
+% ======================================================================
+\section{Baselines}
+
+\begin{settings}
+zero & predicts zero & Reference: how much of the target the neighbours explain at all. \\
+IDW & weighted neighbour mean, weights $\exp(-d^2/2\ell^2)/\bar\sigma^2$; $\ell$ chosen per density from {10, 25, 50, 100, 200, 500 km, ∞} on 200 training stations (selected: 200, 500, ∞, 200 km) & The standard simple interpolator. Long length scales win because the shared signal is nearly uniform over hundreds of km. Held-out stations are not used for the choice. \\
+IDW + noise & IDW + white and flicker noise, $P(f) = A + B/f$ fitted (least squares, 1/64–0.5 cycles/day) to the neighbours' departures from their own IDW prediction & The simplest generator: white plus flicker is the established GNSS noise model \cite{williams}. Fitting both terms jointly matters because flicker noise also has power at short periods. \\
+Kriging & Gaussian-process prediction of each day; covariance $s_\text{cm} + s_r\,\text{Matérn}_{3/2}(d/\ell) + s_n\,\delta$ fitted once to the training years & The best linear predictor under a covariance fitted to the data. Fit: shared part nearly constant from 25 to 300 km; $\ell$ = 21, 5, 13 km (E, N, U); a small regional part. \\
+Kriging + noise & kriging + noise as for IDW + noise & Its generator counterpart. \\
+Space–time GP & three parts (common mode, regional, station), each white + flicker + Gauss–Markov in time; samples the whole window given all neighbour data & The strongest Gaussian generator. The Gauss–Markov term was needed to match the observed covariance at lags of 6–16 days \cite{langbein}. Fitted to \emph{median} covariances, because means describe a disturbed station (Section~\ref{sec:dead}). \\
+\end{settings}
+
+% ======================================================================
+\section{Scores}
+
+All errors are in units of each station's robust scale in its training years; every score is computed per station ($\geq$ 20 scored days) and summarised by the median over stations, as in the benchmark.
+
+\begin{settings}
+Excluded days & $\pm$30 days around an M $\geq$ 6 earthquake NGL lists for the station & Real offsets would dominate the error. \\
+Excluded stations & scatter more than 3$\times$ the training years', or a jump > 50/50/100 mm (E/N/U) between 30-day medians with no listed step within 45 days & Site trouble after the fit, not something a method can predict. (Türkiye: checked on the scored period only.) \\
+nRMSE & RMSE of the sample mean, fast and slow parts & Point accuracy, the benchmark's measure. \\
+CRPS & fair ensemble version \cite{ferro} & Scores the whole distribution of samples; the fair version does not reward too-narrow ensembles. Main score. \\
+Energy score & multivariate CRPS over E, N, U & Also checks the components together. \\
+Coverage & share of truth inside the 50\%/90\% intervals; quantiles with Weibull positions $i/(m+1)$ \cite{hyndman} & Under these positions a calibrated ensemble covers 90\%; common software defaults give about 85\% for 32 members. \\
+Spread/error & ensemble spread over the error of the mean; also pooled over stations and by quartile of station noise & 1 = calibrated. The median station alone can hide calibration problems. \\
+Realism & spectra in 2–128-day bands, scale and 99th-percentile ratios, correlation with neighbours by distance & Single samples must look like real series, not only score well on average. \\
+Screening of samples & generated series screened with the cube's outlier rule & The real series were screened; comparing screened truth with unscreened samples would be unfair. \\
+Paired tests & bootstrap over stations (10,000; a station's networks resampled together) and exact sign test & Methods are compared on the same stations and networks; resampling stations, not networks, avoids counting repeated networks as independent evidence. \\
+\end{settings}
+
+% ======================================================================
+\section{Experiment A: hidden California stations}
+
+\textbf{Question:} how good are generated stations under ordinary conditions? \textbf{Setup:} the 173 held-out stations (154 scored) in 2020–2021, from the training stations at four densities. The validation period is tiled with 256-day windows; the last is aligned to the end and scores only new days.
+
+\resulttable{experiment_a_table}
+
+\textbf{Main findings.}
+\begin{itemize}
+\item Point accuracy barely depends on density (IDW fast nRMSE 0.527 full, 0.532 at 60 km): the shared short-period signal is a common mode that even a sparse network samples well.
+\item Adding noise makes the averages calibrated generators (CRPS 0.393 $\to$ 0.290 for IDW).
+\item The diffusion model has the lowest CRPS at every density (0.285 at 60 km against 0.293 for the GP and IDW + noise), better at about 140 of 154 stations; it reproduces the fall of inter-station correlation with distance, as do kriging + noise and the GP, but not IDW + noise.
+\item v1 was too wide at the median station (spread/error 1.2–1.3) because it cannot know a station's noise level; v2 with the level given is calibrated across noise quartiles (0.96–1.14). v3 scores as v2 (paired differences under 0.5\%).
+\end{itemize}
+
+\resulttable{significance_table}
+
+% ======================================================================
+\section{Experiment B: planted fault-slip events and Ridgecrest}
+
+\textbf{Question:} is a localised signal at the neighbours passed on to the virtual station? \textbf{Setup:} 60 events on real fault surfaces of the SCEC Community Fault Model, displacements from triangular dislocations in an elastic half-space (Poisson's ratio 0.25).
+
+\begin{settings}
+Templates & 30 shallow slow-slip events (8–25 km long, to 2–4 km depth, 0.8–4.5 cm, propagating 0.4–9 km/day) and 30 afterslip events (15–50 km, 5–12 km deep, 10–40 cm, $\log(1+t/\tau)$, $\tau$ = 17–34 days, one year) & Values from published events \cite{materna,vavra,gonzalez}; $\tau$ spans the decay times reported for El Mayor–Cucapah (20 $\pm$ 3 days) and Hector Mine (26 $\pm$ 8). \\
+Event kept & if $\geq$ 1 held-out station moves > 1 mm & Otherwise there is nothing to recover. \\
+Pairing & each target generated twice with identical noise, from the planted and the original network & The difference of the two sample means isolates what the method passed on; everything else cancels. \\
+$\rho$ & $\langle d, s\rangle/\langle s, s\rangle$, horizontal, from onset to 60 days after the end & Share of the planted signal recovered (1 = all). \\
+Footprint & radius of the area with final displacement > 1 mm & To compare event size with station spacing. \\
+Ridgecrest & 13 held-out stations within 300 km with offsets $\geq$ 5 mm; offset = 10-day mean after minus before, 2 days skipped & A real earthquake, kept out of training. \\
+\end{settings}
+
+\textbf{Main findings.} Nothing is recovered unless the footprint exceeds about twice the distance to the nearest station, so shallow slow slip (footprint $\approx$ 9 km) is invisible at every density. Trained without transients, the diffusion model passed on less than the GP. After training with planted transients (v3) it recovers a median of 52\% on the full network (GP 56\%) and is best where events are 2–4 times the station gap. At Ridgecrest on a 60 km network, v3 reproduces offsets with a median error of 3.5 mm where every model trained without transients errs by 9 mm or more. For the GP the reason is visible in its covariance: learned from ordinary days, the shared regional signal fades within about 20 km, so a step seen by neighbours 14--47 km away is treated as their own noise.
+
+\resulttable{b_ridgecrest_table}
+
+% ======================================================================
+\section{Experiment C: Türkiye}
+\label{sec:c}
+
+\textbf{Question:} does the California model work elsewhere without retraining? \textbf{Setup:} every station generated from all others (the 16 nearest within 300 km); nothing tuned on Türkiye: models, input scale, IDW's 60 km length scale, kriging and GP covariances all from California; a station's noise level relative to California's typical station.
+
+\begin{settings}
+Main period & 2013–2015, about 140 stations a day & Dense network outside the fit window. \\
+Sparse period & 2016 onward, about 17 stations a day & What remains of the network later; outside the Kahramanmaraş window. \\
+In-fit check & 2009–2015 with the trajectory fitted to 2019 & Measures what scoring inside a fit changes. \\
+Left out & 47 stations with a fallback fit & Their fit overlaps the scored days. \\
+\end{settings}
+
+\resulttable{c_scores_table}
+
+\textbf{Main findings.} Diffusion v3 has the lowest CRPS in every period: 1.8\% better than the GP in the main period (138 of 150 stations, interval excludes zero), on par with it on the sparse network, and the same ranking in the in-fit check (scoring inside a fit lowers every method's error alike). Its calibration transfers better than the GP's (spread/error 1.12 against 0.84). It is best at every distance to the nearest station.
+
+\resulttable{c_significance_table}
+
+% ======================================================================
+\section{Classifier two-sample test (in progress)}
+
+\textbf{Question:} can a classifier tell generated windows from real ones? \textbf{Procedure} \cite{lopezpaz}: real and generated versions of the same held-out windows (validation years), split \emph{by station} into two folds, a classifier trained on one and tested on the other; accuracy 0.5 means indistinguishable, and the binomial distribution gives an exact p-value.
+
+\begin{settings}
+Windows & 256 days; training windows every 64 days, test windows not overlapping & Overlap adds training data; non-overlapping test windows keep test examples close to independent. \\
+Fairness & generated windows get the real window's gaps and the outlier screen & Neither gaps nor spikes should give a window away. \\
+Variants & marginal (the window) and conditional (+ 4 nearest neighbours) & Does it look like a GNSS series; is it consistent with its surroundings. \\
+Classifier & logistic regression on summary features (noise level, slow part, tails, autocorrelation, band powers; neighbour correlation) & With about 1,000 real windows, a neural network memorised its training data; the feature classifier still detects poor generators clearly. A small CNN is reported as a second check. \\
+Positive controls & IDW (no noise), IDW + noise, kriging + noise & Show the test has the power to detect a poor generator. \\
+\end{settings}
+
+\textbf{Preliminary results} (feature classifier; final numbers after the running re-run): IDW 0.99–1.00, IDW + noise 0.79–0.85, kriging + noise 0.83–0.87; diffusion v3 0.49–0.50 on the full network (indistinguishable) and 0.54–0.55 at 60 km (borderline). The GP is still running.
+
+% ======================================================================
+\section{Decisions that changed, and dead ends}
+\label{sec:dead}
+
+\begin{itemize}
+\item \textbf{Random subsampling $\to$ disk thinning}: random thinning cannot produce a Türkiye-like network.
+\item \textbf{Mean removal $\to$ mean and trend removal}: the mean alone left a drift in the vertical in the validation years.
+\item \textbf{Classifier-free guidance, not used}: at $w = 1.2$ spread/error reached 1.02, but fast coverage fell to 0.85 and neighbour correlation rose by 0.07; at $w = 1.5$ every score was worse. Guidance exaggerates the shared signal, while the excess was in the station's own noise.
+\item \textbf{Earthquake offsets in training, kept}: removing them was considered as the cause of v1's excess width; the model was equally wide on its own training data with and without offsets, so it was not the cause.
+\item \textbf{Excess width explained}: the model hedges over the station's unknown noise level (spread/error 1.43 for the quietest quarter of stations, 0.97 for the noisiest), hence v2's optional noise input.
+\item \textbf{GP fitted to medians, not means}: fitted to mean covariances, the GP described a disturbed station (mean window variance 1.5–1.7$\times$ the median) and scored CRPS 0.306; fitted to medians, 0.293. Both are reported because the switch followed a validation result.
+\item \textbf{Türkiye fit to 2012 instead of 2019}: forced by NGL's coverage of the Turkish network (Section~\ref{sec:c}); the in-fit check shows it does not change the ranking.
+\item \textbf{Transient probability 0.5 $\to$ 0.8}: the visibility rule rejects 39\% of attempts, so 0.5 would have planted only 31\%.
+\item \textbf{CNN $\to$ feature classifier for the C2ST}: the CNN overfitted on about 450 windows per fold and returned near-0.5 accuracy for lack of learning, not for lack of difference.
+\end{itemize}
+
+% ======================================================================
+\section{Open items}
+
+\begin{itemize}
+\item \textbf{Kahramanmaraş case study}: rupture geometry from the USGS mapping of Reitman et al.\ 2023 (data release doi:10.5066/P985I7U2, layer \texttt{simple\_fault}); metre-scale offsets will be run with the unchanged input scaling first.
+\item \textbf{Test period} (California 2022+): scored once, after the model is frozen.
+\item \textbf{Limitations seen so far}: large afterslip signals near an event are passed on only in part by every method; on Türkiye's sparse network, diffusion samples have tails about 31\% heavier than the truth's.
+\end{itemize}
+
+% ======================================================================
+\section{Reproducing}
+
+\begin{footnotesize}
+\begin{verbatim}
+uv run imonet fetch meta
+uv run imonet fetch series --region california          # data
+uv run imonet build --region california                 # cube
+uv run imonet train diffusion --name diffusion-v3 --station-noise --transients 0.8
+uv run imonet eval diffusion --model runs/models/diffusion-v3 --density full 60 --screen
+uv run imonet eval-b diffusion --model runs/models/diffusion-v3 [--ridgecrest]
+uv run imonet eval-c diffusion --model runs/models/diffusion-v3 --period main sparse infit
+uv run imonet c2st diffusion --model runs/models/diffusion-v3
+uv run imonet figures                                    # tables and figures
+\end{verbatim}
+\end{footnotesize}
+
+\begin{thebibliography}{9}\small
+\bibitem{karras} Karras, T., Aittala, M., Aila, T., Laine, S. (2022). Elucidating the design space of diffusion-based generative models. \emph{NeurIPS} 35, 26565–26577.
+\bibitem{williams} Williams, S. D. P., et al. (2004). Error analysis of continuous GPS position time series. \emph{J. Geophys. Res.} 109, B03412.
+\bibitem{langbein} Langbein, J. (2008). Noise in GPS displacement measurements from Southern California and Southern Nevada. \emph{J. Geophys. Res.} 113, B05405.
+\bibitem{ferro} Ferro, C. A. T. (2014). Fair scores for ensemble forecasts. \emph{Q. J. R. Meteorol. Soc.} 140, 1917–1923.
+\bibitem{hyndman} Hyndman, R. J., Fan, Y. (1996). Sample quantiles in statistical packages. \emph{Am. Stat.} 50, 361–365.
+\bibitem{lopezpaz} Lopez-Paz, D., Oquab, M. (2017). Revisiting classifier two-sample tests. \emph{ICLR}.
+\bibitem{materna} Materna, K., et al. (2024). Shallow slow slip events in the Imperial Valley with along-strike propagation. \emph{Geophys. Res. Lett.} 51, e2023GL108089.
+\bibitem{vavra} Vavra, E. J., et al. (2024). Characteristic slow-slip events on the Superstition Hills fault. \emph{Geophys. Res. Lett.} 51, e2023GL107244.
+\bibitem{gonzalez} Gonzalez-Ortega, A., et al. (2014). El Mayor-Cucapah (Mw 7.2) earthquake: early near-field postseismic deformation. \emph{J. Geophys. Res.} 119, 1482–1497.
+\end{thebibliography}
+
+\end{document}

@@ -25,3 +25,10 @@ wheels/
 /paper/*.fls
 /paper/*.fdb_latexmk
 /paper/*.synctex.gz
+
+# Notes build by-products (the .tex is tracked)
+/notes/*.pdf
+/notes/*.log
+/notes/*.aux
+/notes/*.toc
+/notes/*.out
