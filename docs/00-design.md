@@ -612,3 +612,14 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   0.68–0.73, 3.5 mm vs ≥ 9.1 mm for every model without transients (GP's
   covariance decays within 5–21 km). v3 is the model carried forward.
   GP now run on all 7 B networks (`eval-b --skip-done`).
+- Experiment C (2026-10-18, `imonet eval-c`, nothing tuned on Türkiye):
+  main period 2013–2015 (dense network, fit to 2012): diffusion v3 fast CRPS
+  0.369 (level given 0.368) vs GP 0.376 (0.375), IDW/kriging + noise 0.380;
+  paired −1.8% vs GP, better at 135–138/150 stations, Türkiye only −2.0%.
+  Sparse 2016+ (~17 stations/day): diffusion 0.354 vs GP 0.358 (−1.1%,
+  interval spans zero, better at 64/86) — on par; both ~7–8% ahead of the
+  averages; diffusion tails heavier there (log2 0.39). In-fit (fit to 2019,
+  2009–2015): all methods lower, same ranking (−1.5% / −1.9% vs GP).
+  GP too narrow in Türkiye (S/E 0.84, cov90 0.88), diffusion slightly wide
+  (1.12 / 0.90). Diffusion best in every nearest-station distance class.
+  Kahramanmaraş case study still to do (needs a rupture geometry source).

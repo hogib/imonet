@@ -53,22 +53,24 @@ def _write(lines: list[str], out: Path, name: str) -> Path:
 
 
 def scores_table(out: Path, root: Path = RESULTS, name: str = "c_scores_table") -> Path | None:
+    """One block per period, its name as a heading row."""
     rows = [(p, m) for p in PERIODS for m in METHODS if _summary(m, p, root)]
     if not rows:
         return None
-    head = " & ".join(h for _, h in COLS)
-    lines = [r"\begin{tabular}{ll" + "r" * (len(COLS) + 1) + "}", r"\toprule",
-             f"Period & Method & {head} & CRPS$_f$ T\\\"urkiye \\\\", r"\midrule"]
+    n = len(COLS) + 2
+    lines = [r"\begin{tabular}{l" + "r" * (len(COLS) + 1) + "}", r"\toprule",
+             "Method & " + " & ".join(h for _, h in COLS) + r" & CRPS$_f$ TR \\", r"\midrule"]
     last = None
     for p, m in rows:
-        s = _summary(m, p, root)
-        if last is not None and p != last:
-            lines.append(r"\addlinespace")
-        vals = [f"{s[c]:.3f}" if isinstance(s.get(c), (int, float)) and np.isfinite(s[c]) else "--" for c, _ in COLS]
-        tur = s.get("turkiye", {}).get("crps_fast")
-        lines.append(f"{PERIOD_LABELS[p] if p != last else ''} & {METHODS[m]} & " + " & ".join(vals)
-                     + f" & {tur:.3f} \\\\" if tur is not None else " & -- \\\\")
-        last = p
+        if p != last:
+            if last is not None:
+                lines.append(r"\addlinespace")
+            lines.append(f"\\multicolumn{{{n}}}{{l}}{{\\emph{{{PERIOD_LABELS[p]}}}}} \\\\")
+            last = p
+        s_ = _summary(m, p, root)
+        vals = [f"{s_[c]:.3f}" if isinstance(s_.get(c), (int, float)) and np.isfinite(s_[c]) else "--" for c, _ in COLS]
+        tur = s_.get("turkiye", {}).get("crps_fast")
+        lines.append(f"{METHODS[m]} & " + " & ".join(vals) + (f" & {tur:.3f}" if tur is not None else " & --") + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     return _write(lines, out, name)
 
