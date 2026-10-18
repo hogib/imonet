@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from imonet.cube import CALIFORNIA, TEST, VALIDATION, Cube
@@ -75,6 +76,37 @@ def _build(a) -> None:
     build.write_summary(summary, out.with_suffix(".json"))
     say(f"{out}: {summary['stations_kept']} stations, {summary['days']} days "
         f"({summary['first_day']} to {summary['last_day']}), coverage {summary['coverage']}")
+
+
+def _c2st(a) -> None:
+    import json
+    from dataclasses import replace
+    from imonet import c2st
+    say = lambda line: print(line, flush=True)
+    setup = Setup(Cube.load(a.cube), read_steps(a.steps_file))
+    label = a.label or a.method
+    for d in map(_density, a.density):
+        base = a.results / "C2ST" / label / density_name(d)
+        cached = base / "windows.npz"
+        if cached.exists():
+            with np.load(cached) as z:
+                w = {k: z[k] for k in z.files}
+        else:
+            say(f"{label} {density_name(d)}: generating windows")
+            w = c2st.make_windows(setup, a.method, d, 0, a.results, a.model, a.target_noise, progress=say)
+            base.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(cached, **w)
+        say(f"{label} {density_name(d)}: {len(w['t0'])} windows of {len(set(w['station']))} stations")
+        for variant, clf in [(v, c) for v in a.variant for c in a.classifier]:
+            summary, ex = c2st.run(w, variant, replace(c2st.TrainConfig(), classifier=clf), log=say)
+            out = base / variant / clf
+            out.mkdir(parents=True, exist_ok=True)
+            summary = {"method": label, "kind": a.method, "density": density_name(d), **summary}
+            (out / "summary.json").write_text(json.dumps(summary, indent=1))
+            ex.to_csv(out / "examples.csv", index=False)
+            say(f"{label} {density_name(d)} {variant} {clf}: accuracy {summary['accuracy']:.3f} "
+                f"[{summary['ci_low']:.3f}, {summary['ci_high']:.3f}], p = {summary['p_value']:.2g}, "
+                f"{summary['test_examples']} test examples")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -166,6 +198,15 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--target-noise", choices=["unknown", "given"], default="unknown")
     c.add_argument("--screen", action="store_true", help="also score the samples screened for outliers")
 
+    cs = sub.add_parser("c2st", help="classifier two-sample test of generated against real stations")
+    cs.add_argument("method", choices=["zero", "idw", "idw+noise", "krige", "krige+noise", "gp", "diffusion", "regress"])
+    cs.add_argument("--density", nargs="+", default=["full", "60"])
+    cs.add_argument("--variant", nargs="+", choices=["marginal", "conditional"], default=["marginal", "conditional"])
+    cs.add_argument("--model", type=Path, help="trained model directory (diffusion, regress)")
+    cs.add_argument("--label", help="name of the results (default: the method)")
+    cs.add_argument("--target-noise", choices=["unknown", "given"], default="unknown")
+    cs.add_argument("--classifier", nargs="+", choices=["features", "cnn"], default=["features", "cnn"])
+
     bu = sub.add_parser("build", help="build a region's data cube from the fetched series")
     bu.add_argument("--region", choices=list(REGIONS), required=True)
     bu.add_argument("--out", type=Path, help="default data/cube/<region>.npz")
@@ -174,6 +215,9 @@ def main(argv: list[str] | None = None) -> None:
     a = p.parse_args(argv)
     if a.cmd == "build":
         _build(a)
+        return
+    if a.cmd == "c2st":
+        _c2st(a)
         return
     if a.cmd == "eval-c":
         from imonet import experiment_c as C
