@@ -576,3 +576,16 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   of the offsets (GP error 2.7 mm), diffusion 0.53–0.64; only diffusion
   ensembles cover them (54–77% in the 90% range vs 8–19%). Open decision
   (user): train with planted synthetic transients (§4.3) before B again.
+- Training with planted transients (§4.3; 2026-10-17/18): `diffusion-v3` (v2
+  config + `--transients 0.8`, 49% of samples planted) and `regress-v2`.
+  Val loss 0.581 (v2 0.582). Experiment A unchanged: paired CRPS vs v2
+  −0.4…+0.3% (n.s.), energy score +0.5–0.8% at 60 km (sign test p < 0.01);
+  still −2.7…−4.3% CRPS vs GP. B (all 7 networks): footprint > 4× gap,
+  median ρ v3 0.56 vs GP 0.57, v2 0.44, regress-v2 0.60; 2–4× gap v3 0.13 vs
+  GP 0.05; full network median ρ 0.52 (v2 0.36, GP 0.56); least spurious
+  signal. Energy-pooled afterslip barely moves (0.21 vs 0.19): dominated by
+  5 near-field pairs (70% of energy) where every method recovers < 0.5.
+  Ridgecrest: full 0.85 recovered, 2.7 mm (= GP), 81% inside 90%; 60 km
+  0.68–0.73, 3.5 mm vs ≥ 9.1 mm for every model without transients (GP's
+  covariance decays within 5–21 km). v3 is the model carried forward.
+  GP now run on all 7 B networks (`eval-b --skip-done`).
