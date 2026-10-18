@@ -10,7 +10,7 @@ import pandas as pd
 from imonet.cube import CALIFORNIA, TEST, VALIDATION, Cube
 from imonet.evaluate import DENSITIES, RESULTS, THIN_SEEDS, Setup, density_name, report, run
 from imonet.figures import FIGURES
-from imonet.ngl import STEPS, read_steps
+from imonet.ngl import REGIONS, STEPS, WORKERS, read_steps
 from imonet.train import TrainConfig
 
 SPLITS = {"validation": VALIDATION, "test": TEST}
@@ -18,6 +18,63 @@ SPLITS = {"validation": VALIDATION, "test": TEST}
 
 def _density(s: str) -> float | None:
     return None if s == "full" else float(s.removesuffix("km"))
+
+
+def _fetch(a) -> None:
+    from imonet import ngl
+    say = lambda line: print(line, flush=True)
+    if a.what == "borders":
+        from imonet import borders
+        path = ngl.download(borders.URL, borders.BORDERS, refresh=a.refresh)
+        say(f"{path} ({path.stat().st_size / 1e6:.1f} MB)")
+        return
+    if a.what == "cfm":
+        say(f"fault model extracted to {ngl.fetch_cfm(refresh=a.refresh)}")
+        return
+    if a.what == "meta":
+        for path in ngl.fetch_metadata(refresh=a.refresh):
+            say(f"{path} ({path.stat().st_size / 1e6:.1f} MB)")
+        return
+    if bool(a.region) == bool(a.stations):
+        raise SystemExit("fetch series: give --region or --stations")
+    holdings = ngl.read_holdings()
+    if a.region in ngl.STATIONS_OF:
+        raise SystemExit(f"fetch series: {a.region} uses the stations of {ngl.STATIONS_OF[a.region]}")
+    sel = ngl.select(holdings, REGIONS[a.region]) if a.region else holdings[holdings.sta.isin(a.stations)]
+    say(f"fetching {len(sel)} stations with {a.workers} workers into {ngl.TENV3}/")
+    results = ngl.fetch_series(sel.sta.tolist(), refresh=a.refresh, workers=a.workers, progress=say)
+    failed = [r for r in results if r.error]
+    if a.region:
+        ngl.MANIFESTS.mkdir(parents=True, exist_ok=True)
+        path = ngl.MANIFESTS / f"{a.region}.csv"
+        ngl.manifest(sel, results).to_csv(path, index=False)
+        say(f"manifest {path}")
+    say(f"{len(results) - len(failed)} fetched, {len(failed)} failed" + (f": {[r.station for r in failed]}" if failed else ""))
+
+
+def _build(a) -> None:
+    from imonet import build, ngl
+    say = lambda line: print(line, flush=True)
+    manifest = ngl.MANIFESTS / f"{ngl.STATIONS_OF.get(a.region, a.region)}.csv"
+    man = pd.read_csv(manifest)
+    man = man[man.ok].reset_index(drop=True)
+    say(f"building {a.region} from {len(man)} fetched stations")
+    from imonet import borders
+    countries = None
+    if borders.BORDERS.exists():
+        polygons = borders.load()
+        countries = lambda lat, lon: borders.countries(lat, lon, polygons)
+    else:
+        say(f"no {borders.BORDERS} (imonet fetch borders): countries left empty")
+    cube, summary = build.build_cube(man, lambda sta: ngl.read_tenv3(ngl.TENV3 / f"{sta}.tenv3"),
+                                     read_steps(a.steps_file), build.REGION_CONFIG[a.region],
+                                     pd.Timestamp(a.end) if a.end else None, progress=say, countries=countries)
+    out = a.out or Path("data/cube") / f"{a.region}.npz"
+    cube.save(out)
+    summary["manifest"] = str(manifest)
+    build.write_summary(summary, out.with_suffix(".json"))
+    say(f"{out}: {summary['stations_kept']} stations, {summary['days']} days "
+        f"({summary['first_day']} to {summary['last_day']}), coverage {summary['coverage']}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -91,7 +148,50 @@ def main(argv: list[str] | None = None) -> None:
     f.add_argument("--split", choices=list(SPLITS), default="validation")
     f.add_argument("--only", nargs="+", choices=FIGURES, default=list(FIGURES))
 
+    fe = sub.add_parser("fetch", help="download data into data/ (meta: NGL station table and steps; "
+                                       "series: daily .tenv3 of a region's stations; cfm: SCEC fault model; "
+                                       "borders: Natural Earth country polygons)")
+    fe.add_argument("what", choices=["meta", "series", "cfm", "borders"])
+    fe.add_argument("--region", choices=list(REGIONS), help="for series: the region's stations")
+    fe.add_argument("--stations", nargs="+", help="for series: these station ids instead of a region")
+    fe.add_argument("--workers", type=int, default=WORKERS, help="parallel downloads (NGL is a university server)")
+    fe.add_argument("--refresh", action="store_true", help="download again even if cached")
+
+    c = sub.add_parser("eval-c", help="experiment C: every Türkiye station from the others")
+    c.add_argument("method", choices=["zero", "idw", "idw+noise", "krige", "krige+noise", "gp", "diffusion", "regress"])
+    c.add_argument("--period", nargs="+", choices=["main", "sparse", "infit"], default=["main"])
+    c.add_argument("--samples", type=int, default=32)
+    c.add_argument("--model", type=Path, help="trained model directory (diffusion, regress)")
+    c.add_argument("--label", help="name of the results (default: the method)")
+    c.add_argument("--target-noise", choices=["unknown", "given"], default="unknown")
+    c.add_argument("--screen", action="store_true", help="also score the samples screened for outliers")
+
+    bu = sub.add_parser("build", help="build a region's data cube from the fetched series")
+    bu.add_argument("--region", choices=list(REGIONS), required=True)
+    bu.add_argument("--out", type=Path, help="default data/cube/<region>.npz")
+    bu.add_argument("--end", help="last day of the cube (default: the latest epoch)")
+
     a = p.parse_args(argv)
+    if a.cmd == "build":
+        _build(a)
+        return
+    if a.cmd == "eval-c":
+        from imonet import experiment_c as C
+        say = lambda line: print(line, flush=True)
+        steps = read_steps(a.steps_file)
+        for period in a.period:
+            setup, windows = C.setup_for(period, steps, a.results)
+            say(f"{period}: {setup.cube.n_sta} stations, {len(windows)} windows, "
+                f"{int(setup.keep.sum())} scorable after QC and fallback fits")
+            for s_ in C.run(setup, windows, period, a.method, a.samples, a.results, a.model, a.label,
+                            screen=a.screen, target_noise=a.target_noise, progress=say):
+                say(f"{s_['method']} {period}: nrmse_fast {s_['nrmse_fast']:.3f} crps_fast {s_['crps_fast']:.3f} "
+                    f"({s_['scored_stations']} stations; Türkiye {s_['turkiye'].get('crps_fast', float('nan')):.3f}, "
+                    f"{s_['scored_stations_turkiye']} stations; {s_['seconds']} s)")
+        return
+    if a.cmd == "fetch":
+        _fetch(a)
+        return
     if a.cmd == "report":
         with pd.option_context("display.width", 200, "display.max_columns", 30, "display.precision", 3):
             print(report(a.split, a.results))

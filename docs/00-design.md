@@ -50,9 +50,10 @@ so that a model trained in California can be applied in Türkiye.
 
 ### 3.1 California
 
-The gnssdl cube `data/cube/california.npz` is used as it is (`data/` is a
-symlink to gnssdl's data directory). See gnssdl `docs/00-benchmark-contract.md`
-§1 for how it is made. In short:
+`imonet build --region california` makes `data/cube/california.npz` from the
+series `imonet fetch` downloads (`imonet.build`, ported from gnssdl, whose
+cube imonet used until 2026-10-18; rebuilt from the same files, imonet's cube
+is identical to gnssdl's in every array). In short:
 
 - Residuals after a constant + rate + annual + semi-annual + steps fit on
   2008–2019.
@@ -79,12 +80,14 @@ final report.
 
 ### 3.2 Türkiye
 
-There is no Türkiye cube yet. `imonet build` makes one, standalone, with the
-same steps as the California cube:
+`imonet build --region turkiye` makes `data/cube/turkiye.npz` with the same
+steps as the California cube:
 
 1. Download NGL's station table and step catalogue, then the IGS20 daily
-   `.tenv3` series of every station in the Türkiye box with at least three
-   years of data (about 175 stations).
+   `.tenv3` series of every station in the box 35.8–42.2° N, 25.6–44.9° E
+   with at least a year of data (233 stations, including Greek islands,
+   Bulgaria, Georgia, Armenia and northern Iraq). All are targets; scores
+   are also broken down for the stations in Türkiye.
 2. Per station and component, fit constant + rate + annual + semi-annual +
    steps on days up to 2019-12-31. Stations with less than a year of data
    before 2020 use the gnssdl fallback (the first 730 days or 365 epochs) and
@@ -94,9 +97,27 @@ same steps as the California cube:
    California cube.
 
 Türkiye is used for testing only: no training, no tuning, no choice made on
-its scores. Scored days are 2020 onward, like California's validation and
-test periods, so in both regions the scored residuals lie outside the
-trajectory fit.
+its scores.
+
+**Scored periods (decided 2026-10-18, after the download).** NGL's Turkish
+series come from the national CORS network, which it holds densely for
+2009–2015 only (about 140 stations a day; about 20 a day from 2016 on). The
+original plan, a fit to 2019 and scores from 2020, would have tested only
+that sparse remainder. Instead (`imonet build --region turkiye`):
+
+- the trajectory is fitted to the days up to 2012-12-31;
+- **main scores: 2013–2015**, outside the fit, at the dense network's own
+  density (167 stations with ≥ 90 days, 144 in Türkiye; 14 of them have a
+  fallback fit that overlaps these days and are flagged);
+- **sparse case: 2016 on**, outside the Kahramanmaraş window (about 17
+  stations a day);
+- **in-fit experiment** (`--region turkiye-fit2019`, the original fit to
+  2019): scores 2009–2015 inside the fit years, separately, to measure what
+  scoring inside a fit changes.
+
+Country codes per station come from Natural Earth 1:10m polygons
+(`imonet fetch borders`); every station in the box is a target, with
+Türkiye-only breakdowns (205–207 stations kept, 174–176 in Türkiye).
 
 **Kahramanmaraş.** The 2023-02-06 Mw 7.8 Pazarcık and Mw 7.6 Elbistan
 earthquakes are kept out of the main Türkiye scores. From 30 days before
@@ -433,8 +454,8 @@ How they are computed (`imonet.metrics`, `imonet.evaluate`):
   (0–10, 10–25, 25–50, 50–100, 100–200, 200–300 km).
 - **The classifier test is built in step 4**, with the diffusion model.
 
-Results are written to `runs/A/<method>/<split>/<density>_s<seed>/` (not
-`data/`, which is shared with gnssdl); `imonet report` prints the table.
+Results are written to `runs/A/<method>/<split>/<density>_s<seed>/`;
+`imonet report` prints the table.
 
 ### 6.2 B — Planted realistic events (California only, for now)
 
@@ -496,8 +517,10 @@ here first.
 
 ```
 src/imonet/
+  ngl.py         NGL download (station table, steps, tenv3), parsers, regions; fault model download
+  trajectory.py  trajectory fit and residuals
+  build.py       cube assembly: per-station fit, screening, QC, twins, splits, exclusions
   cube.py        load a cube; distance, azimuth and ENU offsets
-  build.py       Türkiye: NGL download, tenv3 parser, trajectory fit, screening
   network.py     thinning; neighbour selection for any coordinate
   data.py        window sampler, torch Dataset
   transients.py  Gaussian (training) and fault-slip (evaluation) events

@@ -81,20 +81,27 @@ def compare(a: str, b: str, score: str = "crps_fast", split: str = "validation",
         idx = pd.MultiIndex.from_product([stations, seeds], names=["station", "seed"])
         return x.reindex(idx).to_numpy().reshape(len(stations), len(seeds), len(cols))
 
-    xa, xb = cube(da), cube(db)
+    return {"a": a, "b": b, "score": score, "density": density, "seeds": len(seeds),
+            **paired(cube(da), cube(db), seed, n_boot)}
+
+
+def paired(xa: np.ndarray, xb: np.ndarray, seed: int = 0, n_boot: int = N_BOOT) -> dict:
+    """The paired comparison of two methods' scores on the same stations
+    (stations × seeds × columns): headline values and difference, its
+    bootstrap interval over stations, and the sign test."""
+    n_sta = xa.shape[0]
     diff = headline(xa) - headline(xb)
     rng = np.random.default_rng(seed)
     boot = np.empty(n_boot)
     for i in range(n_boot):
-        pick = rng.integers(len(stations), size=len(stations))
+        pick = rng.integers(n_sta, size=n_sta)
         boot[i] = headline(xa[pick]) - headline(xb[pick])
     lo, hi = np.quantile(boot, [0.025, 0.975])
     sa, sb = np.nanmean(xa, axis=(1, 2)), np.nanmean(xb, axis=(1, 2))   # per station
     ok = np.isfinite(sa) & np.isfinite(sb) & (sa != sb)
     wins = int((sa[ok] < sb[ok]).sum())
     n = int(ok.sum())
-    return {"a": a, "b": b, "score": score, "density": density, "stations": len(stations), "seeds": len(seeds),
-            "a_value": headline(xa), "b_value": headline(xb), "difference": diff,
+    return {"stations": n_sta, "a_value": headline(xa), "b_value": headline(xb), "difference": diff,
             "relative": diff / headline(xb), "ci_low": float(lo), "ci_high": float(hi),
             "a_better_stations": wins, "compared_stations": n, "sign_p": binomial_two_sided(wins, n)}
 

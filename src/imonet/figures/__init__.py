@@ -14,7 +14,7 @@ from imonet.evaluate import RESULTS
 
 DIFFUSION_MODEL = "diffusion-v1"      # the model drawn in example figures
 FIGURES = ("network_map", "thinning", "training", "scores_by_density", "calibration", "correlation", "spectra",
-           "example", "table", "variants", "generators", "noise_models", "significance", "b")
+           "example", "table", "variants", "generators", "noise_models", "significance", "b", "c")
 
 
 def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "validation",
@@ -57,6 +57,11 @@ def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "valid
         made["b_rho_by_ratio"] = B.rho_by_ratio(out, split, results)
         made["b_rho_table"] = B.rho_table(out, split, results)
         made["b_ridgecrest_table"] = B.ridgecrest_table(out, results)
+    if "c" in only:
+        from imonet.figures import experiment_c as C
+        made["c_scores_table"] = C.scores_table(out, results)
+        made["c_significance_table"] = C.significance_table(out, results)
+        made["c_distance_table"] = C.distance_table(out, results)
     for dens in ("full", "60km"):
         if "correlation" in only:
             made[f"correlation_{dens}"] = A.correlation_by_distance(split, dens, out, results)

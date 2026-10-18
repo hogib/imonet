@@ -247,16 +247,19 @@ class GP(Method):
     """Samples of the target over the window from the space–time GP,
     conditioned on every available neighbour value. target_noise "given"
     scales the target's station part by its noise level (`target_noise` in
-    the batch); "unknown" uses a typical station's."""
+    the batch); "unknown" uses a typical station's. Noise levels are
+    relative to `typical` (3, the fast scale of a typical station; by
+    default the cube's own), as the model was fitted."""
 
     name = "gp"
 
-    def __init__(self, model: SpaceTime, n_samples: int = 32, target_noise: str = "unknown"):
-        self.model, self.n_samples, self.target_noise = model, n_samples, target_noise
+    def __init__(self, model: SpaceTime, n_samples: int = 32, target_noise: str = "unknown",
+                 typical: np.ndarray | None = None):
+        self.model, self.n_samples, self.target_noise, self.typical = model, n_samples, target_noise, typical
 
     def prepare(self, cube, scale, network, ok):
         from imonet.metrics import station_noise_log
-        self.noise_log = station_noise_log(cube)
+        self.noise_log = station_noise_log(cube, self.typical)
 
     def sample(self, batch, rng):
         b, _, length, _ = batch["y"].shape

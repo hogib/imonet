@@ -33,6 +33,7 @@ from imonet.kriging import Covariance, empirical_covariance, fit_covariance
 from imonet.metrics import (correlation_by_distance, event_mask, neighbour_correlations, scoring_qc, screen,
                             station_noise, station_noise_log, station_scale, station_scores, summarise)
 from imonet.network import K_NEIGHBOURS, thin
+from imonet.progress import progress_line
 
 RESULTS = Path("runs")
 DENSITIES = (None, 25.0, 60.0, 100.0)    # median nearest-neighbour km; None = full network
@@ -51,11 +52,17 @@ def period_windows(cube: Cube, split: int, length: int = WINDOW_DAYS) -> list[tu
     a, b = int(days[0]), int(days[-1]) + 1
     if len(days) != b - a:
         raise ValueError("split days are not contiguous")
-    if b - a < length:
-        raise ValueError("split shorter than one window")
-    out = [(t, t) for t in range(a, b - length + 1, length)]
-    if out[-1][0] + length < b:
-        out.append((b - length, out[-1][0] + length))
+    return range_windows(a, b, length)
+
+
+def range_windows(first: int, stop: int, length: int = WINDOW_DAYS) -> list[tuple[int, int]]:
+    """(first day, first scored day) of the windows tiling days [first, stop),
+    the last aligned to the end as in `period_windows`."""
+    if stop - first < length:
+        raise ValueError("range shorter than one window")
+    out = [(t, t) for t in range(first, stop - length + 1, length)]
+    if out[-1][0] + length < stop:
+        out.append((stop - length, out[-1][0] + length))
     return out
 
 
@@ -77,23 +84,19 @@ class Prediction:
     windows: list[dict]         # per (target, window): ti, t0, scored, nbr, dist_km
 
 
-def progress_line(done: int, total: int, t_start: float, unit: str) -> str:
-    """'  [HH:MM] done/total unit, elapsed s, eta m min', for logs read with tail -f."""
-    elapsed = time.time() - t_start
-    eta = f", eta {elapsed / done * (total - done) / 60:.0f} min" if done else ""
-    return f"  [{time.strftime('%H:%M')}] {done}/{total} {unit}, {elapsed:.0f} s{eta}"
-
-
 def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, net: np.ndarray,
-            split: int, seed: int = 0, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS,
-            noise_log: np.ndarray | None = None, progress=None) -> Prediction:
+            split: int | None, seed: int = 0, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS,
+            noise_log: np.ndarray | None = None, progress=None,
+            windows: list[tuple[int, int]] | None = None) -> Prediction:
     """Every method sees the same contexts; with `noise_log` (S×3,
     `station_noise_log`) they include the target's noise level, which only
-    a diffusion model trained with it and told to use it reads. `progress`
-    is called with a line about every tenth of the windows."""
+    a diffusion model trained with it and told to use it reads. The windows
+    tile `split`, or are given as (first day, first scored day) in
+    `windows`. `progress` is called with a line about every tenth of the
+    windows."""
     ok = cube.avail
     method.prepare(cube, scale, net, ok)
-    wins = period_windows(cube, split, length)
+    wins = period_windows(cube, split, length) if windows is None else windows
     days = np.arange(wins[0][0], wins[-1][0] + length)
     out = np.full((method.n_samples, len(targets), len(days), 3), np.nan, dtype=np.float32)
     truth = np.full((len(targets), len(days), 3), np.nan, dtype=np.float32)
@@ -179,16 +182,23 @@ def score(cube: Cube, pred: Prediction, scales: np.ndarray, skip: np.ndarray, ke
 
 
 class Setup:
-    """What every run needs once per cube: scales, scoring exclusions."""
+    """What every run needs once per cube: scales, scoring exclusions.
 
-    def __init__(self, cube: Cube, steps: pd.DataFrame):
+    A cube from another region than the models were trained on passes the
+    training cube's component `scale` (the models' input scaling) and its
+    `typical` fast scale (what station noise levels are relative to), and
+    the days its scoring QC checks (`qc_days`, T bool)."""
+
+    def __init__(self, cube: Cube, steps: pd.DataFrame, scale: np.ndarray | None = None,
+                 typical: np.ndarray | None = None, qc_days: np.ndarray | None = None):
         self.cube = cube
-        self.scale = component_scale(cube)
+        self.scale = component_scale(cube) if scale is None else np.asarray(scale, dtype=np.float32)
         self.station_scale = station_scale(cube)
-        self.noise_log = station_noise_log(cube)
+        self.typical = typical
+        self.noise_log = station_noise_log(cube, typical)
         self.noise = station_noise(log=self.noise_log)
         self.skip = event_mask(cube, steps)
-        self.keep, self.qc_dropped = scoring_qc(cube, steps)
+        self.keep, self.qc_dropped = scoring_qc(cube, steps, qc_days)
 
 
 def tune_idw(setup: Setup, density: float | None, seed: int = 0) -> dict:
@@ -241,7 +251,7 @@ def method_for(setup: Setup, method_name: str, density: float | None, n_samples:
     if method_name == "gp":
         from imonet.gp import GP
         model = space_time_model(setup, root)
-        return GP(model, n_samples, target_noise), {"model": asdict(model), "target_noise": target_noise}
+        return GP(model, n_samples, target_noise, setup.typical), {"model": asdict(model), "target_noise": target_noise}
     covariance = None
     if method_name in ("krige", "krige+noise"):
         covariance = kriging_covariance(setup, root)

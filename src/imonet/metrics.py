@@ -100,12 +100,9 @@ def station_scale(cube: Cube) -> np.ndarray:
     return out
 
 
-def station_noise_log(cube: Cube) -> np.ndarray:
-    """S×3: each station's day-to-day noise level per component relative to
-    a typical station, as a natural log, from its training years as
-    `station_scale`: the log of the robust scale of the fast part over the
-    median of that scale over stations. 0 is a typical station; NaN without
-    data. Also an optional input of the diffusion model (`imonet.model.net`)."""
+def station_fast_scale(cube: Cube) -> np.ndarray:
+    """S×3 robust scale of each station's fast part in its training years
+    (as `station_scale`); NaN without data."""
     train = (cube.split_day == TRAIN)[None, :] & cube.avail & ~cube.exclude
     fast = np.full((cube.n_sta, 3), np.nan)
     for i in range(cube.n_sta):
@@ -113,7 +110,19 @@ def station_noise_log(cube: Cube) -> np.ndarray:
         if cells.any():
             x = np.where(cells[:, None], cube.r[i], np.nan).astype(np.float64)
             fast[i] = robust_scale(fast_part(x)[cells])
-    return np.log(fast / np.nanmedian(fast, axis=0))
+    return fast
+
+
+def station_noise_log(cube: Cube, typical: np.ndarray | None = None) -> np.ndarray:
+    """S×3: each station's day-to-day noise level per component relative to
+    a typical station, as a natural log: the log of the robust scale of its
+    fast part in its training years over `typical` (3), by default the
+    median of that scale over the cube's stations. 0 is a typical station;
+    NaN without data. Also an optional input of the diffusion model
+    (`imonet.model.net`); a cube from another region passes California's
+    typical scale, which the model learned the levels against."""
+    fast = station_fast_scale(cube)
+    return np.log(fast / (np.nanmedian(fast, axis=0) if typical is None else typical))
 
 
 def station_noise(cube: Cube | None = None, log: np.ndarray | None = None) -> np.ndarray:
@@ -206,16 +215,18 @@ def event_mask(cube: Cube, steps: pd.DataFrame) -> np.ndarray:
     return out
 
 
-def scoring_qc(cube: Cube, steps: pd.DataFrame) -> tuple[np.ndarray, pd.DataFrame]:
+def scoring_qc(cube: Cube, steps: pd.DataFrame, later_days: np.ndarray | None = None) -> tuple[np.ndarray, pd.DataFrame]:
     """Stations left out of scoring for site trouble after the training
     years, as gnssdl: day-to-day scatter more than 3× the training years',
     or a jump of more than 50/50/100 mm between consecutive 30-day medians
     with no listed step within 45 days. Uses only each station's own data and
-    the step list, so it is the same for every method. Returns (S bool keep,
-    table of the dropped)."""
+    the step list, so it is the same for every method. `later_days` (T
+    bool) are the days checked, by default every day after the training
+    years. Returns (S bool keep, table of the dropped)."""
     days = pd.DatetimeIndex(cube.days)
     train = (cube.split_day == TRAIN)[None, :] & cube.avail & ~cube.exclude
-    later = (cube.split_day > TRAIN)[None, :] & cube.avail & ~cube.exclude
+    later_days = cube.split_day > TRAIN if later_days is None else later_days
+    later = later_days[None, :] & cube.avail & ~cube.exclude
     keep = np.ones(cube.n_sta, dtype=bool)
     dropped = []
     known = {s: pd.DatetimeIndex(g.date) for s, g in steps.groupby("sta")}
