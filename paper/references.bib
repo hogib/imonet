@@ -136,7 +136,8 @@
 }
 
 % ---------------------------------------------------------------------------
-% Added for imonet. Written from memory: check every field before submission.
+% Added for imonet. Checked 2026-10-18: DOIs against Crossref, the NeurIPS papers against
+% proceedings.neurips.cc, arXiv ids against arXiv, the ICLR paper against OpenReview.
 % ---------------------------------------------------------------------------
 
 @inproceedings{ho2020ddpm,
@@ -213,7 +214,8 @@
   author = {Lopez-Paz, David and Oquab, Maxime},
   title = {{Revisiting Classifier Two-Sample Tests}},
   booktitle = {International Conference on Learning Representations},
-  year = {2017}
+  year = {2017},
+  url = {https://openreview.net/forum?id=SJkXfE5xx}
 }
 
 @book{rasmussen2006,
@@ -310,4 +312,102 @@
   pages = {1482--1497},
   year = {2014},
   doi = {10.1002/2013JB010193}
+}
+
+@misc{naturalearth,
+  author = {{Natural Earth}},
+  title = {{Admin 0 -- Countries, 1:10m cultural vectors, version 5.1.2}},
+  howpublished = {\url{https://github.com/nvkelso/natural-earth-vector}},
+  note = {Public domain; accessed 18 October 2026},
+  year = {2022}
+}
+
+% Added 2026-10-18 for the related-work section; checked against Crossref,
+% the NeurIPS proceedings or arXiv, and the full texts.
+
+@inproceedings{tashiro2021csdi,
+  author = {Tashiro, Yusuke and Song, Jiaming and Song, Yang and Ermon, Stefano},
+  title = {{CSDI: Conditional Score-based Diffusion Models for Probabilistic Time Series Imputation}},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume = {34},
+  pages = {24804--24816},
+  year = {2021}
+}
+
+@inproceedings{liu2023pristi,
+  author = {Liu, Mingzhe and Huang, Han and Feng, Hao and Sun, Leilei and Du, Bowen and Fu, Yanjie},
+  title = {{PriSTI: A Conditional Diffusion Framework for Spatiotemporal Imputation}},
+  booktitle = {2023 IEEE 39th International Conference on Data Engineering (ICDE)},
+  pages = {1927--1939},
+  year = {2023},
+  doi = {10.1109/ICDE55515.2023.00150}
+}
+
+@inproceedings{hu2024ustd,
+  author = {Hu, Junfeng and Liu, Xu and Fan, Zhencheng and Liang, Yuxuan and Zimmermann, Roger},
+  title = {{Towards Unifying Diffusion Models for Probabilistic Spatio-Temporal Graph Learning}},
+  booktitle = {Proceedings of the 32nd ACM International Conference on Advances in Geographic Information Systems},
+  pages = {135--146},
+  year = {2024},
+  doi = {10.1145/3678717.3691235}
+}
+
+@inproceedings{xu2025kits,
+  author = {Xu, Qianxiong and Long, Cheng and Li, Ziyue and Ruan, Sijie and Zhao, Rui and Li, Zhishuai},
+  title = {{KITS: Inductive Spatio-Temporal Kriging with Increment Training Strategy}},
+  booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  volume = {39},
+  number = {12},
+  pages = {12945--12953},
+  year = {2025},
+  doi = {10.1609/aaai.v39i12.33412}
+}
+
+@misc{teutschmann2026gnssfm,
+  author = {Teutschmann, Nick and Crocetti, Laura and Lehmann, Fanny and Trentini, Leonardo and Soja, Benedikt},
+  title = {{GNSS-FM: A Self-Supervised Foundation Model for Daily GNSS Displacement Time Series}},
+  year = {2026},
+  eprint = {2606.07725},
+  archivePrefix = {arXiv}
+}
+
+@article{costantino2023,
+  author = {Costantino, Giuseppe and Giffard-Roisin, Sophie and Radiguet, Mathilde and Dalla Mura, Mauro and Marsan, David and Socquet, Anne},
+  title = {{Multi-station deep learning on geodetic time series detects slow slip events in Cascadia}},
+  journal = {Communications Earth \& Environment},
+  volume = {4},
+  pages = {435},
+  year = {2023},
+  doi = {10.1038/s43247-023-01107-7}
+}
+
+@article{costantino2024,
+  author = {Costantino, Giuseppe and Giffard-Roisin, Sophie and Dalla Mura, Mauro and Socquet, Anne},
+  title = {{Denoising of Geodetic Time Series Using Spatiotemporal Graph Neural Networks: Application to Slow Slip Event Extraction}},
+  journal = {IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing},
+  volume = {17},
+  pages = {17567--17579},
+  year = {2024},
+  doi = {10.1109/JSTARS.2024.3465270}
+}
+
+@article{li2023interp,
+  author = {Li, Zhen and Lu, Tieding and Yu, Kegen and Wang, Jie},
+  title = {{Interpolation of GNSS Position Time Series Using GBDT, XGBoost, and RF Machine Learning Algorithms and Models Error Analysis}},
+  journal = {Remote Sensing},
+  volume = {15},
+  number = {18},
+  pages = {4374},
+  year = {2023},
+  doi = {10.3390/rs15184374}
+}
+
+@article{benoist2020,
+  author = {Benoist, C. and Collilieux, X. and Rebischung, P. and Altamimi, Z. and Jamet, O. and M{\'e}tivier, L. and Chanard, K. and Bel, L.},
+  title = {{Accounting for spatiotemporal correlations of GNSS coordinate time series to estimate station velocities}},
+  journal = {Journal of Geodynamics},
+  volume = {135},
+  pages = {101693},
+  year = {2020},
+  doi = {10.1016/j.jog.2020.101693}
 }

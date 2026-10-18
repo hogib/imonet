@@ -1,8 +1,13 @@
 \documentclass[preprint,12pt,authoryear]{elsarticle}
 
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage{lmodern}
+\usepackage{iftex}
+\ifTUTeX                          % XeTeX/LuaTeX (tectonic): Unicode fonts, so ı İ ş ğ can be typed directly
+  \usepackage{fontspec}           % Latin Modern by default
+\else                             % pdfLaTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+\fi
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{array}
@@ -25,11 +30,10 @@
 \title{Generating virtual GNSS stations from their neighbours with a conditional diffusion model: design, baselines and a first model\tnoteref{wr}}
 \tnotetext[wr]{Working report, drafted with Claude Code. It records the state of the project and is updated as results come in.}
 
-\author[ytu]{H. O\u{g}uz Bolat\corref{cor}}
+\author[ytu]{H. Oğuz Bolat\corref{cor}}
 \ead{oguz.bolat@std.yildiz.edu.tr}
 \cortext[cor]{Corresponding author}
-\author[ytu]{\.{I}smail Haydar \.{I}mamo\u{g}lu}
-\affiliation[ytu]{organization={Department of Geomatics Engineering, Y{\i}ld{\i}z Technical University},
+\affiliation[ytu]{organization={Department of Geomatics Engineering, Yıldız Technical University},
   city={Istanbul}, country={T\"urkiye}}
 
 \begin{abstract}
@@ -51,14 +55,41 @@ This paper asks whether the series that a station \emph{would} record at a locat
 
 In the benchmark that preceded this work, the best deterministic predictor from neighbours reduced the median normalised error of a held-out station's short-period variations only from 0.73, for predicting zero, to about 0.52. A regression model would therefore generate virtual stations that are systematically too smooth and too quiet, with too little variance and the wrong spectrum. A conditional generative model can instead draw the station-specific part from a learned distribution while taking the shared part from the neighbours. We use a conditional diffusion model \citep{ho2020ddpm,karras2022edm}, whose samples can be scored against the truth with proper scoring rules \citep{gneiting2007} and whose realism can be checked against the spectra and spatial correlations of real stations.
 
-The study is designed around network densification. The model is trained and validated in California, where 173 stations are held out of training entirely and their generated counterparts compared with their real series, and it is tested without any tuning in T\"urkiye. Section~\ref{sec:data} describes the data, Section~\ref{sec:method} the problem, the sampling design and the baselines, and Section~\ref{sec:eval} the evaluation protocol. Section~\ref{sec:results} reports the baselines, and Section~\ref{sec:status} the decisions taken so far and the work that remains.
+The study is designed around network densification. The model is trained and validated in California, where 173 stations are held out of training entirely and their generated counterparts compared with their real series, and it is tested without any tuning in T\"urkiye. Section~\ref{sec:related} reviews related work, Section~\ref{sec:data} describes the data, Section~\ref{sec:method} the problem, the sampling design, the model and the baselines, and Section~\ref{sec:eval} the evaluation protocol. Section~\ref{sec:results} reports the results, and Section~\ref{sec:status} the decisions taken so far and the work that remains.
+
+\section{Related work}
+\label{sec:related}
+
+\subsection{Shared and station-specific signal in GNSS series}
+
+A station's daily residuals combine signal shared with its region and signal of its own. Spatial filtering, introduced for the first continuously operating array in southern California, estimates the shared part, the common-mode error, by stacking the residuals of a network and removes it from every station \citep{wdowinski1997}. Principal component analysis of the same network later showed that common-mode errors dominate daily solutions and are close to spatially uniform across southern California, which implies a source of very long wavelength \citep{dong2006}. Over larger areas the common mode varies: in western Europe, a filter built from the stations closest to each target removes more noise than a regional one, particularly in the vertical \citep{kreemer2021}. Part of the shared signal is physical, since atmospheric, hydrological and non-tidal ocean loading produce much of the nonlinear variation of coordinate time series \citep{li2025loading}. The station-specific part is correlated in time. Maximum-likelihood analyses describe it as white plus flicker noise in most solutions \citep{williams2004}, with random-walk, power-law and first-order Gauss--Markov components at many stations in southern California and Nevada \citep{langbein2008}; both studies find its amplitude to depend on the monument. \citet{benoist2020} fitted an exponential spatiotemporal covariance model to the stochastic variations of the IGS repro2 series and showed that accounting for spatial and temporal correlation together improves coordinates and velocities estimated from short series. These studies characterise the residual field that a virtual station must reproduce; they do not generate it where there is no station.
+
+\subsection{Estimating fields and series away from stations}
+
+Geodetic interpolation has mostly concerned static fields. Strain rates are interpolated from GNSS velocities with spatially varying smoothing and formal uncertainties \citep{shen2015}, and horizontal velocity fields with the Green's functions of a thin elastic sheet, which couple the two components \citep{sandwell2016}; both interpolate a field that does not change from day to day. For time series, \citet{tian2016} estimated the regional common mode with neighbours weighted by their distance and by the correlation of their long-term residuals with the target's, which requires a record at the target, and \citet{qiu2024} filled gaps in GNSS position series with an improved Gaussian process applied to the station's own record. Closest to the present task, \citet{li2023interp} predicted the series of each of five stations in North China from those of the others with gradient-boosted trees and random forests; for scattered missing days, the vertical precision improved by 45\% over cubic splines. These predictions are deterministic, and the target is an existing station with gaps. Gaussian-process regression \citep{rasmussen2006} and covariance functions for space--time data \citep{gneiting2002} provide the probabilistic counterpart, on which the kriging and Gaussian-process baselines of this study are built (Section~\ref{sec:baselines}).
+
+\subsection{Machine learning on GNSS position series}
+
+Deep learning on GNSS position series has so far served mostly detection and denoising. \citet{costantino2023} trained a multi-station detector of slow slip events on synthetic series made of realistic noise and modelled slip, and applied it to raw series in Cascadia from 2007 to 2022, where it retrieved 87.5\% of previously catalogued events. Graph neural networks denoise the series of irregular networks whose stations come and go: trained on the same kind of synthetic data, SSEdenoiser extracts slow slip from raw Cascadia series \citep{costantino2024}, and \citet{bachelot2025} reconstructed each station's noise from its eight nearest stations beyond 40~km, reducing the common-mode noise of the horizontal components by more than 70\% and 30\% in two processing solutions. In denoising, the part of a station that its neighbours predict is removed as noise and the remainder is kept as signal; here, that part is the starting point, and the remainder is what has to be generated. A foundation model pretrained on the series of more than 17,000 stations supports forecasting and the localisation of earthquake steps, but processes each station's window on its own \citep{teutschmann2026gnssfm}. Training on synthetic transients is thus established for detection and denoising; this study uses it to teach a generator to pass signal on (Section~\ref{sec:model}) and tests the transfer on fault-slip events and on a real earthquake.
+
+\subsection{Kriging, imputation and diffusion models}
+
+Machine learning has addressed the same task for other sensor networks. Inductive kriging estimates series at unobserved nodes of a sensor graph with graph neural networks trained by masking observed nodes \citep{wu2021ignnk}, and \citet{xu2025kits} reduced the gap between the sparse graph seen in training and the denser one met in inference by adding virtual nodes to the training graph. Graph neural networks also impute missing values in sensor networks \citep{cini2022grin}, including very sparse observations \citep{marisca2022spin}. These predictions are deterministic. Diffusion models generate samples by reversing a gradual noising process \citep{ho2020ddpm,karras2022edm}, and conditioning, optionally with guidance \citep{ho2022cfg}, turns them into predictors. CSDI conditions a score-based diffusion model on the observed values of a multivariate time series for probabilistic imputation and evaluates it with the CRPS \citep{tashiro2021csdi}; PriSTI adds conditional features built from spatiotemporal dependencies and geographic relationships, for spatiotemporal imputation including sensor failure \citep{liu2023pristi}; and USTD treats forecasting and kriging as conditional generation, with a deterministic encoder and diffusion decoders, on traffic and air-quality networks of 36 to 358 sensors \citep{hu2024ustd}. The model of this study belongs to this family. It differs in what geodesy requires: generation at arbitrary coordinates rather than at the nodes of a fixed graph, sparse and irregular network geometries learned by thinning a dense network, evaluation of realism (spectra, inter-station correlation, calibration across stations of different noise levels) and of the transfer of physical transients, and transfer to another region without retraining.
+
+\subsection{Judging generated series}
+
+A scoring rule is proper if a forecaster obtains the best expected score by reporting its true predictive distribution \citep{gneiting2007}; the continuous ranked probability score (CRPS) and its multivariate generalisation, the energy score, are proper scores for real-valued outcomes. For a finite ensemble, the usual CRPS favours ensembles drawn from too narrow a distribution, and a fair version corrects this \citep{ferro2014}. The coverage of an ensemble's intervals depends on how sample quantiles are defined \citep{hyndman1996}. Classifier two-sample tests ask whether a classifier trained to separate real from generated samples does better than chance \citep{lopezpaz2017}.
+
+\subsection{This study}
+
+To our knowledge, no previous study generates GNSS position series probabilistically at locations without a station from the surrounding network. Probabilistic kriging with diffusion models exists for traffic and air-quality sensors \citep{hu2024ustd}; GNSS series have been predicted from neighbours deterministically \citep{li2023interp} or for denoising \citep{bachelot2025}; and synthetic transients have trained detectors and denoisers \citep{costantino2023,costantino2024}. This study combines these elements for virtual GNSS stations and adds what they do not test: calibration across stations of different noise levels, the transfer of fault-slip events as a function of network spacing, a real earthquake, and transfer between regions.
 
 \section{Data}
 \label{sec:data}
 
 \subsection{California}
 
-We use the daily IGS20 solutions of NGL for 1,251 stations in and around California, from 2008-01-01 to 2026-09-26 (6,844 days), as assembled in the data cube of the preceding benchmark. For each station and component, a constant, a rate, annual and semi-annual terms and steps are fitted to the years 2008--2019; the residuals of this fit are the data. Equipment steps are estimated and removed; earthquake offsets are kept, since they are spatially coherent signal that a virtual station should reproduce. Outliers more than five robust standard deviations from a 61-day running median are removed, as are stations with excessive scatter (groundwater subsidence, unstable monuments) and the less complete member of any pair of stations closer than 1~km.
+We use the daily IGS20 solutions of NGL for 1,251 stations in and around California, from 2008-01-01 to 2026-09-26 (6,844 days), processed as in the preceding benchmark; rebuilt with this study's code from the same files, the data are identical to the benchmark's. For each station and component, a constant, a rate, annual and semi-annual terms and steps are fitted to the years 2008--2019; the residuals of this fit are the data. Equipment steps are estimated and removed; earthquake offsets are kept, since they are spatially coherent signal that a virtual station should reproduce. Outliers more than five robust standard deviations from a 61-day running median are removed, as are stations with excessive scatter (groundwater subsidence, unstable monuments) and the less complete member of any pair of stations closer than 1~km.
 
 The years 2008--2019 are used for training, 2020--2021 for validation and 2022 onward for testing. Of the stations, 173 are held out (Figure~\ref{fig:network}). Held-out stations are excluded from training entirely: they are never a training target, never a neighbour, and never part of the input network when another station is the target. They serve only as evaluation targets. Days around the 2019 Ridgecrest earthquakes are excluded from training.
 
@@ -73,7 +104,26 @@ The residuals are heavy-tailed. Their robust scale over the training data ($1.48
 
 \subsection{T\"urkiye}
 
-NGL provides about 175 stations in T\"urkiye with at least three years of data. A data cube will be built from them with the same steps, with the trajectory fitted on data up to 2019 so that, as in California, all scored days lie outside the fit. The T\"urkiye data are used only for testing. The period from 30 days before to 365 days after the 2023-02-06 Kahramanmara\c{s} earthquakes ($M_w$~7.8 and 7.6), whose coseismic offsets reach metres, is kept out of the main scores and studied separately.
+NGL provides 233 stations with at least a year of data in the box 35.8--42.2$^\circ$N, 25.6--44.9$^\circ$E, which contains T\"urkiye and parts of its neighbours: the eastern Aegean islands, Bulgaria, Georgia, Armenia, northern Iraq and Iran. They are processed with the same steps as California's, except for the fit window. Most of the series come from T\"urkiye's national continuous network, which NGL holds densely only for 2009--2015: about 140 stations record on a typical day of those years and about 17 from 2016 on (Table~\ref{tab:turkiye}). Fitting the trajectory to 2019, as in California, would leave only the sparse remainder outside the fit. The trajectory is therefore fitted to the days up to 2012, and the main scores use 2013--2015, outside the fit and with the dense network. Of the 233 stations, 207 are kept (3 have too little data for a fit, 5 fail the scatter limits and 18 are the less complete member of a pair closer than 1~km), 176 of them in T\"urkiye according to the 1:10m country polygons of \citet{naturalearth}, with two islets in the Sea of Marmara that the polygons omit assigned to the nearest country. Every station is a target, and scores are also reported for those in T\"urkiye. The T\"urkiye data are used only for testing.
+
+\begin{table}[t]
+\centering
+\caption{The T\"urkiye data: station-days, the median number of stations recording on a day, and the number of stations with at least 90 days, in each scored period. Sparse: outside the Kahramanmara\c{s} window, which runs from 30 days before to 365 days after the first mainshock. In-fit: the same stations with the trajectory fitted to 2019.}
+\label{tab:turkiye}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Period & Station-days & Per day & Stations & In T\"urkiye \\
+\midrule
+Main: 2013--2015 & 140,138 & 141 & 167 & 144 \\
+Sparse: 2016 on & 82,194 & 17 & 139 & 110 \\
+Kahramanmara\c{s} & 21,750 & 29 & 108 & 92 \\
+In-fit: 2009--2015 & 331,960 & 138 & 172 & 148 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three further sets of days are studied separately. From 2016 on, outside the Kahramanmara\c{s} window, the network is sparse. The period from 30 days before to 365 days after the 2023-02-06 Kahramanmara\c{s} earthquakes ($M_w$~7.8 and 7.6), whose coseismic offsets reach metres, is a case study. And the same stations with the trajectory fitted to 2019 give 2009--2015 inside the fit years, to measure what scoring inside a fit changes.
 
 \subsection{Removal of each window's mean and trend}
 \label{sec:detrend}
@@ -167,7 +217,7 @@ Six baselines define what the diffusion model has to improve on: three simple on
 \item[Kriging + noise] adds noise to the kriging prediction as IDW + noise does, fitted to the departures of the neighbours from their own kriging predictions.
 \item[Space--time Gaussian process] generates the target's whole window jointly. Each component is the sum of three independent parts, each separable in space and time: the common mode, the regional part (Mat\'ern, $\ell$ from the kriging fit) and the station's own part, scaled by the square of the station's noise level relative to a typical station. The temporal covariance of each part is the sum of white noise, flicker noise and a first-order Gauss--Markov process \citep{williams2004,langbein2008}; without the Gauss--Markov term the station part falls short of the observed covariance at lags of 6--16 days. The parts are fitted to lag curves of the training years between 0 and 128 days, computed exactly for a detrended window: from pairs 100--300~km apart (common mode), pairs within 10~km (regional) and each station with itself (station part), with amplitudes by non-negative least squares and the Gauss--Markov time constant by grid search. Space--time interaction \citep{gneiting2002} would act only on the small regional part and is omitted. Samples are drawn from the target's distribution conditional on every available neighbour value in the window, with a flat prior on each neighbour's mean and trend \citep[eq.~2.42]{rasmussen2006}, which conditions on the neighbours as detrended. Covariances in the lag curves are medians over stations or station pairs within each window, averaged over windows; Section~\ref{sec:gaussian} explains why.
 \end{description}
-Methods that weight neighbours by the correlation of their past residuals with the target's \citep{tian2016} need a record at the target, which a virtual station lacks; interpolators of velocity fields \citep{shen2015,sandwell2016} provide no uncertainty; and the closest Gaussian-process method for GNSS series fills gaps from a station's own record \citep{qiu2024}. None of them is reimplemented.
+Related methods that are not reimplemented here are reviewed in Section~\ref{sec:related}.
 A fourth comparison, the diffusion model's network trained with a squared-error loss, will show what the generative formulation adds beyond its own conditional mean.
 
 \section{Evaluation}
@@ -197,7 +247,7 @@ As a real event, held-out stations within 300~km of the 2019 Ridgecrest earthqua
 
 \subsection{Experiment C: T\"urkiye}
 
-The trained model, without further tuning, generates each T\"urkiye station from all others and is scored as in experiment A at T\"urkiye's own density. The Kahramanmara\c{s} sequence is analysed separately: the coseismic offsets and the first year of postseismic deformation of virtual stations near the rupture are compared with the observed ones, as a function of distance from the rupture and from the nearest station.
+Every station is generated in turn from all the others, its 16 nearest within 300~km, at the network's own density. Nothing is tuned on T\"urkiye: the trained models and their input scaling, the length scale of IDW (California's at 60~km, T\"urkiye's spacing) and the covariances of kriging and the space--time Gaussian process all come from California, and a station's noise level is relative to California's typical station, as the models learned it. Scoring follows experiment A with three changes: the quality control that drops stations for site trouble checks the scored period's own days, so that a station is not dropped from 2013--2015 for trouble years later; stations with too short a record before the fit's end, whose trajectory is fitted to the start of their record and so overlaps the scored days, are left out; and the Kahramanmara\c{s} window is skipped. The Kahramanmara\c{s} sequence is analysed separately: the coseismic offsets and the first year of postseismic deformation of virtual stations near the rupture are compared with the observed ones, as a function of distance from the rupture and from the nearest station.
 
 \section{Results}
 \label{sec:results}
@@ -404,6 +454,10 @@ Without the noise level, diffusion v2 scores as the first model (fast CRPS 0.279
 \label{sec:status}
 
 The following decisions departed from the initial plan, each on the evidence given above: minimum-separation thinning replaced random subsampling (Table~\ref{tab:thinning}); a fifth of the training samples retain the full network with no minimum distance, and the minimum distance on thinned networks is drawn from 1--100~km instead of 10--100~km, raising the share of training samples with a neighbour within 5~km from 1\% to 3\%; each window's mean and trend are removed from every series (Table~\ref{tab:drift}); and the classifier test was moved from the baseline stage to the model stage. The baseline results set two targets for the diffusion model, a short-period CRPS below 0.29 at 60~km density and inter-station correlations that decrease with distance as those of real stations do; the first trained model meets both. Its ensembles appeared too wide; three remedies were considered. Screening the samples as the observations were screened changes little and is retained as part of scoring generative methods. Classifier-free guidance narrows the ensembles only by exaggerating the shared signal and is not used. Removing the earthquake offsets from the training residuals is set aside, since the model is as wide on its own training distribution, earthquake steps or not, as on the validation period. The excess is instead explained by the station's unknown noise level, over which the model, like the baseline, hedges; pooled over stations its short-period intervals are calibrated, and a residual long-period excess of 10--15\% remains. Given the station's noise level as an optional input, the second diffusion model is calibrated across stations and loses most of the excess variability of the first. Against Gaussian generators built on a covariance fitted to the training years, the diffusion model keeps a lead of about 3\% in CRPS, but its reproduction of the decrease of correlation with distance is shared with kriging + noise and the space--time Gaussian process, and the comparison with IDW + noise overstated it. Experiment B showed that, without training on localised transients, the diffusion model transfers planted events no better than the near-uniform averages and less well than the space--time Gaussian process. Training with synthetic transients planted in the inputs, as planned (Section~\ref{sec:model}), raised the transfer of planted events to near that of the Gaussian process on the full network and above it where events are two to four times larger than the gaps between stations, at no cost in CRPS on ordinary days, and made the diffusion model the most accurate method for the real Ridgecrest offsets on a network as sparse as T\"urkiye's; it is the model carried forward. The largest afterslip signals, at stations close to the event, are still passed on only in part by every method. The remaining work is the classifier test, the test period, and the T\"urkiye data cube and experiment C.
+
+\section*{Acknowledgements}
+
+We thank Dr.\ Bülent Bolat (Department of Electronics and Communications Engineering, Yıldız Technical University) for his guidance and support, and İsmail Haydar İmamoğlu for his support.
 
 \bibliographystyle{elsarticle-harv}
 \bibliography{references}

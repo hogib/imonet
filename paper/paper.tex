@@ -1,8 +1,13 @@
 \documentclass[preprint,12pt,authoryear]{elsarticle}
 
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage{lmodern}
+\usepackage{iftex}
+\ifTUTeX                          % XeTeX/LuaTeX (tectonic): Unicode fonts, so ı İ ş ğ can be typed directly
+  \usepackage{fontspec}           % Latin Modern by default
+\else                             % pdfLaTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+\fi
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{array}
@@ -24,7 +29,6 @@
 \author[ytu]{H. O\u{g}uz Bolat\corref{cor}}
 \ead{oguz.bolat@std.yildiz.edu.tr}
 \cortext[cor]{Corresponding author}
-\author[ytu]{\.{I}smail Haydar \.{I}mamo\u{g}lu}
 \affiliation[ytu]{organization={Department of Geomatics Engineering, Y{\i}ld{\i}z Technical University},
   city={Istanbul}, country={T\"urkiye}}
 
