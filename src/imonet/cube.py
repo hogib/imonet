@@ -1,11 +1,10 @@
 """The data cube (daily residual series of a station network) and geometry.
 
-The California cube is gnssdl's `data/cube/california.npz`, used as it is
-(gnssdl docs/00-benchmark-contract.md §1). Türkiye cubes made by
-`imonet build` hold the same arrays. See docs/00-design.md §3.
-
-gnssdl's precomputed neighbour graphs (`nbr_*`, `radii`) are not loaded:
-imonet selects neighbours itself, for any coordinate and any thinned network
+Cubes are built by `imonet build` (imonet.build) from downloaded NGL
+series: `data/cube/california.npz` and `data/cube/turkiye.npz`. See
+docs/00-design.md §3. A cube built earlier by gnssdl loads as well; its
+neighbour graphs (`nbr_*`, `radii`) are ignored, since imonet selects
+neighbours itself, for any coordinate and any thinned network
 (`imonet.network`).
 """
 
@@ -42,6 +41,11 @@ class Cube:
     qstep_sta: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int32))
     qstep_day: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int32))
     qstep_amp: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), dtype=np.float32))
+    # S bool: trajectory fitted on the start of the record, which overlaps
+    # later days (imonet.build); empty in cubes that predate the flag.
+    fallback_fit: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
+    # S str: ISO 3166-1 alpha-3 country code (imonet.borders); empty in older cubes.
+    country: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype="<U3"))
 
     @classmethod
     def load(cls, path: Path | str = CALIFORNIA) -> "Cube":

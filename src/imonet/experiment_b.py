@@ -45,7 +45,8 @@ import pandas as pd
 
 from imonet.cube import HELD_OUT, Cube, offsets_km
 from imonet.data import WINDOW_DAYS, context, day_of_year, detrend, target, target_noise
-from imonet.evaluate import RESULTS, Setup, density_name, method_for, network, period_windows, progress_line
+from imonet.evaluate import RESULTS, Setup, density_name, method_for, network, period_windows
+from imonet.progress import progress_line
 from imonet import events as ev_mod
 from imonet.metrics import crps, inside as inside_interval
 from imonet.network import K_NEIGHBOURS

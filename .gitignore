@@ -9,10 +9,10 @@ wheels/
 # Virtual environments
 .venv
 
-# Symlink to gnssdl data (no trailing slash: a "data/" pattern would not match a symlink)
-/data
+# Downloaded and built data (imonet fetch, imonet build)
+/data/
 
-# Results of imonet runs (data/ is shared with gnssdl)
+# Results of imonet runs
 /runs/
 
 # LaTeX builds (figures/ is tracked so the paper builds without the data)
