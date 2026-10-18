@@ -77,6 +77,13 @@ class Prediction:
     windows: list[dict]         # per (target, window): ti, t0, scored, nbr, dist_km
 
 
+def progress_line(done: int, total: int, t_start: float, unit: str) -> str:
+    """'  [HH:MM] done/total unit, elapsed s, eta m min', for logs read with tail -f."""
+    elapsed = time.time() - t_start
+    eta = f", eta {elapsed / done * (total - done) / 60:.0f} min" if done else ""
+    return f"  [{time.strftime('%H:%M')}] {done}/{total} {unit}, {elapsed:.0f} s{eta}"
+
+
 def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, net: np.ndarray,
             split: int, seed: int = 0, length: int = WINDOW_DAYS, k: int = K_NEIGHBOURS,
             noise_log: np.ndarray | None = None, progress=None) -> Prediction:
@@ -96,7 +103,7 @@ def predict(method: Method, cube: Cube, scale: np.ndarray, targets: np.ndarray, 
     t_start, next_report = time.time(), 0.1
     for a in range(0, len(jobs), BATCH):
         if progress and a / len(jobs) >= next_report:
-            progress(f"  {a}/{len(jobs)} windows, {time.time() - t_start:.0f} s")
+            progress(progress_line(a, len(jobs), t_start, "windows"))
             next_report += 0.1
         chunk = jobs[a:a + BATCH]
         ctxs, truths = [], []

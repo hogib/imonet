@@ -101,9 +101,12 @@ def compare(a: str, b: str, score: str = "crps_fast", split: str = "validation",
 
 DENSITY_ORDER = ("full", "25km", "60km", "100km")
 TABLE_PAIRS = (("diffusion", "idw+noise"), ("diffusion", "krige+noise"), ("diffusion", "gp"),
-               ("diffusion-v2-given", "gp-given"))
-LABELS = {"diffusion": "diffusion", "idw+noise": "IDW + noise", "krige+noise": "kriging + noise",
-          "gp": "GP", "diffusion-v2-given": "diffusion v2 (given)", "gp-given": "GP (given)"}
+               ("diffusion-v2-given", "gp-given"), ("diffusion-v3-unknown", "gp"), ("diffusion-v3-given", "gp-given"),
+               ("diffusion-v3-given", "diffusion-v2-given"), ("diffusion-v3-unknown", "diffusion-v2-unknown"))
+LABELS = {"diffusion": "diffusion v1", "idw+noise": "IDW + noise", "krige+noise": "kriging + noise",
+          "gp": "GP", "diffusion-v2-given": "diffusion v2 (given)", "gp-given": "GP (given)",
+          "diffusion-v3-given": "diffusion v3 (given)", "diffusion-v2-unknown": "diffusion v2 (unknown)",
+          "diffusion-v3-unknown": "diffusion v3 (unknown)"}
 
 
 def table(out: Path, split: str = "validation", root: Path = RESULTS, score: str = "crps_fast",
@@ -115,7 +118,7 @@ def table(out: Path, split: str = "validation", root: Path = RESULTS, score: str
              r"Comparison & Density & Difference (\%) & 95\% interval & Stations \\", r"\midrule"]
     any_row = False
     for k, (a, b) in enumerate(TABLE_PAIRS):
-        first = True
+        first, row = True, 0
         for d in DENSITY_ORDER:
             try:
                 r = compare(a, b, score, split, d, root)
@@ -124,11 +127,12 @@ def table(out: Path, split: str = "validation", root: Path = RESULTS, score: str
             if first and any_row:
                 lines.append(r"\addlinespace")
             base = r["b_value"]
-            label = f"{LABELS.get(a, a)} vs {LABELS.get(b, b)}" if first else ""
+            # the comparison on two rows, "a" then "vs b", to keep the table narrow
+            label = LABELS.get(a, a) if row == 0 else f"vs {LABELS.get(b, b)}" if row == 1 else ""
             lines.append(f"{label} & {d.replace('km', '~km')} & ${100 * r['relative']:+.1f}$ & "
                          f"[${100 * r['ci_low'] / base:+.1f}$, ${100 * r['ci_high'] / base:+.1f}$] & "
                          f"{r['a_better_stations']}/{r['compared_stations']} \\\\")
-            first, any_row = False, True
+            first, any_row, row = False, True, row + 1
     if not any_row:
         return None
     lines += [r"\bottomrule", r"\end{tabular}"]

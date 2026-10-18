@@ -71,6 +71,7 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--target-noise", choices=["unknown", "given"], default="unknown")
     b.add_argument("--per-template", type=int, default=30, help="events per template")
     b.add_argument("--ridgecrest", action="store_true", help="the real 2019 Ridgecrest events instead")
+    b.add_argument("--skip-done", action="store_true", help="skip networks that already have results")
 
     cp = sub.add_parser("compare", help="paired comparison of two methods, station by station")
     cp.add_argument("a")
@@ -109,6 +110,10 @@ def main(argv: list[str] | None = None) -> None:
                     say(f"ridgecrest {density_name(d)} s{seed}: {len(df)} targets within 300 km, {len(big)} with "
                         f"offsets >= 5 mm: recovered {big.recovered_h.median():.2f} (median), error "
                         f"{big.error_h_mm.median():.1f} mm, 90% inside {big.inside90_h.mean():.2f}")
+                    continue
+                done = a.results / "B" / (a.label or a.method) / a.split / f"{density_name(d)}_s{seed}" / "summary.json"
+                if a.skip_done and done.exists():
+                    say(f"{a.label or a.method} {density_name(d)} s{seed}: done already, skipped")
                     continue
                 df = B.run(setup, a.method, SPLITS[a.split], a.split, d, seed, events, a.samples, a.results,
                            a.model, a.label, a.target_noise, progress=say)

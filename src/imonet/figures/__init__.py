@@ -48,6 +48,7 @@ def make_all(cube: Cube, out: Path, results: Path = RESULTS, split: str = "valid
     if "noise_models" in only:
         made["calibration_noise_models"] = A.calibration_by_noise_models(runs, out)
         made["noise_models_table"] = A.noise_models_table(runs, out)
+        made["transients_table"] = A.transients_table(runs, out)
     if "significance" in only:
         from imonet.significance import table as significance_table
         made["significance"] = significance_table(out, split, results)

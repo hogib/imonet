@@ -24,18 +24,38 @@ from imonet.figures.style import INK_2, METHODS, STYLE, WIDTH, method_style, sav
 
 RATIO_BINS = (0, 0.25, 0.5, 1, 2, 4, 100)
 DENSITY_ORDER = ("full", "25km", "60km", "100km")
-B_METHODS = {"diffusion-v2": "diffusion", "diffusion-v2-given": "diffusion"}   # drawn in a main method's style
-B_LABELS = {"diffusion": "diffusion v1", "diffusion-v2": "diffusion v2",
-            "diffusion-v2-given": "diffusion v2, level given"}
+# Model versions drawn in their family's colour: (family, label, style changes).
+# v1/v2 dashed with open markers, the models trained with planted transients
+# (diffusion-v3, regress-v2) solid.
+_OLD = {"linestyle": (0, (4, 2)), "markerfacecolor": "white"}
+B_VARIANTS = {
+    "diffusion": ("diffusion", "diffusion v1", {"linestyle": (0, (1, 1.5)), "markerfacecolor": "white"}),
+    "diffusion-v2": ("diffusion", "diffusion v2", _OLD),
+    "diffusion-v2-given": ("diffusion", "diffusion v2, level given", _OLD),
+    "diffusion-v3": ("diffusion", "diffusion v3 (transients)", {}),
+    "diffusion-v3-given": ("diffusion", "diffusion v3, level given", {}),
+    "regress": ("regress", "regress v1", _OLD),
+    "regress-v2": ("regress", "regress v2 (transients)", {}),
+}
+B_METHODS = {k: v[0] for k, v in B_VARIANTS.items() if k != v[0]}
+SINGLE = ("idw", "krige", "regress", "regress-v2")      # one series, no ensemble range
 
 
 def _style(name: str) -> dict:
-    st = method_style(B_METHODS.get(name, name))
-    return st | ({"label": B_LABELS[name]} if name in B_LABELS else {})
+    if name not in B_VARIANTS:
+        return method_style(name)
+    family, label, extra = B_VARIANTS[name]
+    return method_style(family) | {"label": label} | extra
+
+
+def _tex(label: str) -> str:
+    return label.replace("\u2013", "--")
 
 
 def _order(names) -> list[str]:
-    key = lambda m: list(METHODS).index(B_METHODS.get(m, m)) if B_METHODS.get(m, m) in METHODS else 99
+    def key(m):
+        family = B_METHODS.get(m, m)
+        return (list(METHODS).index(family) if family in METHODS else 99, list(B_VARIANTS).index(m) if m in B_VARIANTS else -1)
     return sorted(names, key=key)
 
 
@@ -94,7 +114,7 @@ def rho_table(out: Path, split: str = "validation", root: Path = RESULTS, name: 
             lines.append(r"\addlinespace")
         for j, m in enumerate(_order(pooled.loc[tp].index)):
             vals = [f"{pooled.loc[(tp, m), c]:.3f}" if np.isfinite(pooled.loc[(tp, m), c]) else "--" for c in cols]
-            lines.append(f"{tp if j == 0 else ''} & {_style(m)['label']} & " + " & ".join(vals) + r" \\")
+            lines.append(f"{tp if j == 0 else ''} & {_tex(_style(m)['label'])} & " + " & ".join(vals) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{name}.tex"
@@ -122,9 +142,9 @@ def ridgecrest_table(out: Path, root: Path = RESULTS, name: str = "b_ridgecrest_
             r = df[(df.method == m) & (df.density == d)]
             for c, _ in cols:
                 v = r[c].iloc[0] if len(r) and r[c].iloc[0] is not None else np.nan
-                single = c.startswith("inside") and m in ("idw", "krige", "regress")
+                single = c.startswith("inside") and m in SINGLE
                 vals.append("--" if single or not np.isfinite(v) else (f"{v:.1f}" if "error" in c else f"{v:.2f}"))
-        lines.append(f"{_style(m)['label']} & " + " & ".join(vals) + r" \\")
+        lines.append(f"{_tex(_style(m)['label'])} & " + " & ".join(vals) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{name}.tex"

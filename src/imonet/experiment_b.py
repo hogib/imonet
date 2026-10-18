@@ -45,7 +45,7 @@ import pandas as pd
 
 from imonet.cube import HELD_OUT, Cube, offsets_km
 from imonet.data import WINDOW_DAYS, context, day_of_year, detrend, target, target_noise
-from imonet.evaluate import RESULTS, Setup, density_name, method_for, network, period_windows
+from imonet.evaluate import RESULTS, Setup, density_name, method_for, network, period_windows, progress_line
 from imonet import events as ev_mod
 from imonet.metrics import crps, inside as inside_interval
 from imonet.network import K_NEIGHBOURS
@@ -331,7 +331,7 @@ def run(setup: Setup, method_name: str, split: int, split_name: str, density: fl
     for i, ev in enumerate(events):
         rows += score_event(pred, setup.cube, ev, split)
         if progress:
-            progress(f"  event {i + 1}/{len(events)} ({ev.template}), {time.time() - t:.0f} s")
+            progress(progress_line(i + 1, len(events), t, f"events ({ev.template})"))
     df = pd.DataFrame(rows)
     out = root / "B" / (label or method_name) / split_name / f"{density_name(density)}_s{seed}"
     out.mkdir(parents=True, exist_ok=True)

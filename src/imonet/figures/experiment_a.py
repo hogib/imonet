@@ -380,13 +380,14 @@ def calibration_by_noise_models(df: pd.DataFrame, out: Path, density: str = "60k
         return save(fig, out, f"calibration_noise_models_{density}")
 
 
-def noise_models_table(df: pd.DataFrame, out: Path, name: str = "noise_models_table") -> Path | None:
-    """The models of `calibration_by_noise_models` at full density and 60 km,
-    mean over thinning seeds, as a LaTeX tabular."""
-    present = [(m, lab) for m, lab, _ in NOISE_MODELS if m in set(df.method)]
+def noise_models_table(df: pd.DataFrame, out: Path, name: str = "noise_models_table",
+                       models=NOISE_MODELS, columns=NOISE_MODEL_COLS) -> Path | None:
+    """`models` (default those of `calibration_by_noise_models`) at full
+    density and 60 km, mean over thinning seeds, as a LaTeX tabular."""
+    present = [(m, lab) for m, lab, *_ in models if m in set(df.method)]
     if not present:
         return None
-    cols = [(c, h) for c, h in NOISE_MODEL_COLS if c in df]
+    cols = [(c, h) for c, h in columns if c in df]
     lines = [r"\begin{tabular}{ll" + "r" * len(cols) + "}", r"\toprule",
              "Density & Model & " + " & ".join(h for _, h in cols) + r" \\", r"\midrule"]
     for i, dens in enumerate(("full", "60km")):
@@ -406,3 +407,22 @@ def noise_models_table(df: pd.DataFrame, out: Path, name: str = "noise_models_ta
     path = out / f"{name}.tex"
     path.write_text("\n".join(lines) + "\n")
     return path
+
+
+# The models trained with planted transients (docs/00-design.md §4.3) against
+# the same models without them.
+TRANSIENT_MODELS = (
+    ("diffusion-v2-unknown", "diffusion v2, level unknown"),
+    ("diffusion-v3-unknown", "diffusion v3, level unknown"),
+    ("diffusion-v2-given", "diffusion v2, level given"),
+    ("diffusion-v3-given", "diffusion v3, level given"),
+    ("regress", "regress v1"),
+    ("regress-v2", "regress v2"),
+)
+TRANSIENT_COLS = (("crps_fast", "CRPS$_f$"), ("nrmse_fast", "nRMSE$_f$"), ("energy_total", "ES"),
+                  ("cover90_fast", "Cov.$_{90,f}$"), ("spread_skill", "S/E"),
+                  ("spread_skill_pooled", "S/E$_\\mathrm{pool}$"), ("tail_log2", "Tail"))
+
+
+def transients_table(df: pd.DataFrame, out: Path, name: str = "transients_table") -> Path | None:
+    return noise_models_table(df, out, name, TRANSIENT_MODELS, TRANSIENT_COLS)
