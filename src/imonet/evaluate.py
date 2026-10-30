@@ -199,6 +199,13 @@ class Setup:
         self.noise = station_noise(log=self.noise_log)
         self.skip = event_mask(cube, steps)
         self.keep, self.qc_dropped = scoring_qc(cube, steps, qc_days)
+        # Stations whose trajectory was fitted on the start of their record
+        # (fewer than a year of training days) are not scored: their fit and
+        # their normaliser (`station_scale`, which falls back to every
+        # available day for them) overlap the scored years.
+        self.fallback_left_out = int(cube.fallback_fit.sum()) if len(cube.fallback_fit) else 0
+        if self.fallback_left_out:
+            self.keep &= ~cube.fallback_fit
 
 
 def tune_idw(setup: Setup, density: float | None, seed: int = 0) -> dict:
@@ -311,7 +318,8 @@ def run(setup: Setup, method_name: str, split: int, split_name: str, density: fl
     for name, p, more in variants:
         per, pairs = score(cube, p, setup.station_scale, setup.skip, setup.keep, noise=setup.noise)
         summary = {"method": name, "kind": method_name, "split": split_name, "density": density_name(density),
-                   "seed": seed, "network_stations": int(len(net)), "samples": method.n_samples, **extra, **more,
+                   "seed": seed, "network_stations": int(len(net)), "scored_stations": int(len(per)),
+                   "fallback_left_out": setup.fallback_left_out, "samples": method.n_samples, **extra, **more,
                    **summarise(per), "seconds": round(time.time() - t, 1)}
         out = run_dir(name, split_name, density, seed, root)
         out.mkdir(parents=True, exist_ok=True)
@@ -325,18 +333,22 @@ def run(setup: Setup, method_name: str, split: int, split_name: str, density: fl
 
 def rescore(cube: Cube, split_name: str = "validation", root: Path = RESULTS) -> int:
     """Recompute every run's summary of a split from its per-station scores
-    (stations.csv), after adding each station's noise level; for when the
-    summary changes and the samples are long gone. Returns the runs updated."""
+    (stations.csv), after dropping the fallback-fit stations and adding each
+    station's noise level; for when the summary changes and the samples are
+    long gone. Returns the runs updated."""
     noise = dict(zip(map(str, cube.sta), station_noise(cube)))
+    fallback = set(map(str, cube.sta[cube.fallback_fit])) if len(cube.fallback_fit) else set()
     n = 0
     for path in sorted((root / "A").glob(f"*/{split_name}/*/stations.csv")):
         per = pd.read_csv(path)
         if per.empty:
             continue
+        per = per[~per["station"].astype(str).isin(fallback)]      # as `Setup` now leaves them out
         per["noise"] = per["station"].astype(str).map(noise)
         per.to_csv(path, index=False)
         summary_path = path.parent / "summary.json"
         summary = json.loads(summary_path.read_text())
+        summary |= {"scored_stations": int(len(per)), "fallback_left_out": len(fallback)}
         summary_path.write_text(json.dumps(summary | summarise(per), indent=1))
         n += 1
     return n

@@ -79,7 +79,7 @@ Fit window, Türkiye & to 2012-12-31 & NGL holds Türkiye's national network den
 Steps & estimated if $\geq$ 30 days of fit data on each side & Fewer days cannot separate a step from noise. \\
 Earthquake steps & estimated, then \emph{kept} in the residual & Coseismic offsets are real, spatially coherent signal that a virtual station should reproduce. They are estimated so that they do not bias the velocity. \\
 Equipment steps & removed; after the fit window by the median jump over 30 days either side ($\geq$ 5 days each) & Antenna changes are not signal. After the fit window they cannot be estimated by the fit, hence the local jump. \\
-Too little data before the fit end & fit on the first 730 days or 365 epochs instead (“fallback”) & Keeps the station, but its fit then overlaps later days: such stations are held out in California and left out of the Türkiye scores. \\
+Too little data before the fit end & fit on the first 730 days or 365 epochs instead (“fallback”) & Keeps the station, but its fit then overlaps later days: such stations are held out in California and left out of every score (their fit and normalising scale would overlap the scored days). \\
 Outlier screening & days > 5 robust $\sigma$ from a 61-day running median removed & Removes single bad days without touching signal that lasts longer than a few days. Thresholds inherited from the benchmark. \\
 Station quality & dropped if robust scale of fit residuals > 10 mm (horizontal) or 30 mm (vertical) & Removes subsiding or unstable stations whose residuals are not GNSS noise. Thresholds inherited from the benchmark. \\
 Twins & of stations closer than 1 km, keep the one with most data & Co-located pairs would make prediction trivially easy. \\
@@ -212,16 +212,16 @@ Paired tests & bootstrap over stations (10,000; a station's networks resampled t
 % ======================================================================
 \section{Experiment A: hidden California stations}
 
-\textbf{Question:} how good are generated stations under ordinary conditions? \textbf{Setup:} the 173 held-out stations (154 scored) in 2020–2021, from the training stations at four densities. The validation period is tiled with 256-day windows; the last is aligned to the end and scores only new days.
+\textbf{Question:} how good are generated stations under ordinary conditions? \textbf{Setup:} the 173 held-out stations (107 scored: the 56 with a fallback fit are left out, and 10 fail the scoring QC) in 2020–2021, from the training stations at four densities. The validation period is tiled with 256-day windows; the last is aligned to the end and scores only new days.
 
 \resulttable{experiment_a_table}
 
 \textbf{Main findings.}
 \begin{itemize}
-\item Point accuracy barely depends on density (IDW fast nRMSE 0.527 full, 0.532 at 60 km): the shared short-period signal is a common mode that even a sparse network samples well.
-\item Adding noise makes the averages calibrated generators (CRPS 0.393 $\to$ 0.290 for IDW).
-\item The diffusion model has the lowest CRPS at every density (0.285 at 60 km against 0.293 for the GP and IDW + noise), better at about 140 of 154 stations; it reproduces the fall of inter-station correlation with distance, as do kriging + noise and the GP, but not IDW + noise.
-\item v1 was too wide at the median station (spread/error 1.2–1.3) because it cannot know a station's noise level; v2 with the level given is calibrated across noise quartiles (0.96–1.14). v3 scores as v2 (paired differences under 0.5\%).
+\item Point accuracy barely depends on density (IDW fast nRMSE 0.560 full, 0.565 at 60 km): the shared short-period signal is a common mode that even a sparse network samples well.
+\item Adding noise makes the averages calibrated generators (CRPS 0.421 $\to$ 0.308 for IDW).
+\item The diffusion model has the lowest CRPS at every density (0.301 at 60 km against 0.312 for the GP and 0.310 for IDW + noise), better at about 100 of 107 stations; it reproduces the fall of inter-station correlation with distance, as do kriging + noise and the GP, but not IDW + noise.
+\item v1 was too wide at the median station (spread/error 1.26–1.33) because it cannot know a station's noise level; v2 with the level given is calibrated across noise quartiles (1.03–1.16). v3 scores as v2 (paired differences under 0.5\%).
 \end{itemize}
 
 \resulttable{significance_table}
@@ -314,8 +314,8 @@ diffusion v3, level given & 0.50 & 0.52 & 0.51 & 0.50 \\
 \item \textbf{Mean removal $\to$ mean and trend removal}: the mean alone left a drift in the vertical in the validation years.
 \item \textbf{Classifier-free guidance, not used}: at $w = 1.2$ spread/error reached 1.02, but fast coverage fell to 0.85 and neighbour correlation rose by 0.07; at $w = 1.5$ every score was worse. Guidance exaggerates the shared signal, while the excess was in the station's own noise.
 \item \textbf{Earthquake offsets in training, kept}: removing them was considered as the cause of v1's excess width; the model was equally wide on its own training data with and without offsets, so it was not the cause.
-\item \textbf{Excess width explained}: the model hedges over the station's unknown noise level (spread/error 1.43 for the quietest quarter of stations, 0.97 for the noisiest), hence v2's optional noise input.
-\item \textbf{GP fitted to medians, not means}: fitted to mean covariances, the GP described a disturbed station (mean window variance 1.5–1.7$\times$ the median) and scored CRPS 0.306; fitted to medians, 0.293. Both are reported because the switch followed a validation result.
+\item \textbf{Excess width explained}: the model hedges over the station's unknown noise level (spread/error 1.47–1.53 for the quietest quarter of stations, 1.02–1.05 for the noisiest), hence v2's optional noise input.
+\item \textbf{GP fitted to medians, not means}: fitted to mean covariances, the GP described a disturbed station (mean window variance 1.5–1.7$\times$ the median) and scored CRPS 0.326; fitted to medians, 0.312. Both are reported because the switch followed a validation result.
 \item \textbf{Türkiye fit to 2012 instead of 2019}: forced by NGL's coverage of the Turkish network (Section~\ref{sec:c}); the in-fit check shows it does not change the ranking.
 \item \textbf{Transient probability 0.5 $\to$ 0.8}: the visibility rule rejects 39\% of attempts, so 0.5 would have planted only 31\%.
 \item \textbf{CNN $\to$ feature classifier for the C2ST}: the CNN overfitted on about 450 windows per fold and returned near-0.5 accuracy for lack of learning, not for lack of difference.

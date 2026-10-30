@@ -18,11 +18,11 @@ Periods (`PERIODS`):
 - infit: 2009–2015 on `turkiye-fit2019` (fitted to 2019, as California),
   inside the fit years, a separate experiment.
 
-Scoring is as in experiment A, with three changes. The scoring QC checks
-the period's own days, so that a station is not dropped from 2013–2015 for
-trouble a decade later. Stations whose trajectory was fitted on the start
-of their record (`fallback_fit`), which overlaps the scored days, are left
-out. The Kahramanmaraş window is skipped. Every summary is given for all
+Scoring is as in experiment A (which, like here, leaves out the stations
+whose trajectory was fitted on the start of their record, `fallback_fit`),
+with two changes. The scoring QC checks the period's own days, so that a
+station is not dropped from 2013–2015 for trouble a decade later. The
+Kahramanmaraş window is skipped. Every summary is given for all
 stations and for those in Türkiye (`country`).
 
 Results: runs/C/<label>/<period>/{summary.json, stations.csv,
@@ -100,8 +100,6 @@ def setup_for(period_name: str, steps: pd.DataFrame, root: Path = RESULTS,
     ref = reference(root)
     setup = Setup(cube, steps, scale=np.asarray(ref["scale"]), typical=np.asarray(ref["typical"]),
                   qc_days=in_period)
-    if len(cube.fallback_fit):
-        setup.keep &= ~cube.fallback_fit
     setup.skip = setup.skip | cube.exclude
     windows = [w for a, b in ranges for w in range_windows(a, b)]
     return setup, windows
@@ -135,7 +133,7 @@ def run(setup: Setup, windows: list[tuple[int, int]], period_name: str, method_n
         summary = {"method": name, "kind": method_name, "period": period_name, "cube": PERIODS[period_name].cube,
                    "network_stations": int(len(net)), "scored_stations": int(len(per)),
                    "scored_stations_turkiye": int(len(home)), "qc_dropped": int(len(setup.qc_dropped)),
-                   "fallback_left_out": int(setup.cube.fallback_fit.sum()) if len(setup.cube.fallback_fit) else 0,
+                   "fallback_left_out": setup.fallback_left_out,
                    "samples": method.n_samples, **extra, **more, **summarise(per),
                    "turkiye": summarise(home), "seconds": round(time.time() - t, 1)}
         out = root / "C" / name / period_name

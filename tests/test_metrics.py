@@ -164,3 +164,32 @@ def test_station_noise_is_relative_to_a_typical_station():
     noise = station_noise(cube)
     assert np.nanmedian(noise) == pytest.approx(1.0, rel=0.2)
     assert noise[0] > 2.0 * np.nanmedian(noise)
+
+
+def test_setup_leaves_out_fallback_fit_stations_and_rescore_drops_them(tmp_path):
+    import json
+    from dataclasses import replace
+    from imonet.evaluate import Setup, rescore
+    cube = synthetic_cube()
+    fallback = np.zeros(cube.n_sta, bool)
+    fallback[[0, 7]] = True                          # two held-out stations with a fallback fit
+    cube = replace(cube, fallback_fit=fallback)
+    steps = pd.DataFrame(columns=["sta", "date", "kind", "info", "radius_km", "dist_km", "mag"])
+    setup = Setup(cube, steps)
+    assert setup.fallback_left_out == 2
+    assert not setup.keep[0] and not setup.keep[7]
+    assert setup.keep[14]
+    run = tmp_path / "A" / "m" / "validation" / "60km_s0"
+    run.mkdir(parents=True)
+    v = [0.1, 0.2, 0.9]
+    per = pd.DataFrame({"station": ["S000", "S007", "S014"], "noise": 1.0, "cells": 10, "cover90_fast": 0.9,
+                        **{f"{k}_{c}": v for k in ("nrmse_fast", "nrmse_total", "spread_skill", "crps_fast")
+                           for c in "enu"}})
+    per.to_csv(run / "stations.csv", index=False)
+    (run / "summary.json").write_text(json.dumps({"method": "m"}))
+    assert rescore(cube, "validation", tmp_path) == 1
+    kept = pd.read_csv(run / "stations.csv")
+    assert list(kept["station"]) == ["S014"]
+    summary = json.loads((run / "summary.json").read_text())
+    assert summary["scored_stations"] == 1 and summary["fallback_left_out"] == 2
+    assert summary["nrmse_fast"] == pytest.approx(0.9)

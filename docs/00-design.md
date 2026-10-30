@@ -364,8 +364,8 @@ Details (`imonet.baselines`):
   (pairs) within each window, averaged over windows (2026-10-16): fitted to
   means, the GP described a disturbed station (mean window variance 1.5–1.7×
   the median, slow part 5–6×) and its samples were 25% too large and 2.6×
-  too strong at 64–128 days (`gp-moments`, CRPS 0.306 at 60 km s0); fitted
-  to medians it scores CRPS 0.293 (as idw+noise), spread/error 0.99 at the
+  too strong at 64–128 days (`gp-moments`, CRPS 0.326 at 60 km s0); fitted
+  to medians it scores CRPS 0.312 (as idw+noise), spread/error 1.03 at the
   median station, |Δr| 0.009. The switch was prompted by that validation
   result, so both are reported.
 - Results (60 km, s0): `krige` ≈ `idw` and `krige+noise` ≈ `idw+noise` at
@@ -410,7 +410,11 @@ How they are computed (`imonet.metrics`, `imonet.evaluate`):
 
 - **Normalisation and summary, as gnssdl** (contract §4). Errors are in
   units of the station's robust training-years scale; every score is
-  computed per station (at least 20 scored days) and summarised by the
+  computed per station (at least 20 scored days; stations with a fallback
+  trajectory fit are not scored, since their fit and scale would come from
+  the scored years, 2026-10-30: this removed 47 of the 154 California
+  stations scored before and lowered every method's median by about 6%,
+  rankings unchanged) and summarised by the
   median over stations; a component-free name (`nrmse_fast`) is the mean of
   the E, N, U medians. The same stations and days are left out: days within
   ±30 of an M ≥ 6 earthquake NGL lists for the station (fast and slow parts
@@ -582,12 +586,12 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   quartile; `imonet rescore` recomputes summaries from stations.csv.
 - Conditioning on the virtual station's noise level (§4.4): `diffusion-v2`
   trained 2026-10-16 (val loss 0.582, as v1). Given the level: spread/error
-  0.96–1.14 across noise quartiles (v1 1.46→0.97), fast 90% coverage
-  0.90–0.92 per quartile, tail log2 0.04 (v1 0.27), PSD 64–128 d excess
-  gone, CRPS 0.278/0.283 (full/60 km) against v1 0.279/0.285. Unknown:
-  CRPS as v1 (paired −0.2/−0.4%, n.s.), better calibrated (S/E 1.12 vs
-  1.23). The GP given the same level gains little. Criteria met except the
-  noisiest quartile leaning wide (1.11–1.14).
+  1.03–1.16 across noise quartiles (v1 1.47–1.53→1.02–1.05), fast 90% coverage
+  0.91–0.92 per quartile, tail log2 0.04 (v1 0.26), PSD 64–128 d excess
+  gone, CRPS 0.297/0.299 (full/60 km) against v1 0.298/0.301. Unknown:
+  CRPS as v1 (paired −0.3/−0.0%, n.s.), better calibrated (S/E 1.16 vs
+  1.30). The GP given the same level gains little. Criteria met except the
+  noisiest quartile leaning wide (1.15–1.16).
 - Experiment B (2026-10-17, validation, existing models, no transient
   augmentation): 60 events (30 slow slip, footprint ~9 km; 30 afterslip,
   ~53 km), `imonet eval-b`, results in runs/B. Nothing is transferred
