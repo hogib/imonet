@@ -92,3 +92,33 @@ def test_offset_of_a_step():
     assert offset(x, ok, 20)[0] == pytest.approx(5.0)
     ok[25:28] = False
     assert offset(x, ok, 20)[0] == pytest.approx(5.0)
+
+
+def test_rescore_drops_fallback_stations_from_events_and_ridgecrest(tmp_path):
+    import json
+    from dataclasses import replace
+    from imonet.experiment_b import rescore, summarise_b, summarise_ridgecrest
+    cube = synthetic_cube()
+    fallback = np.zeros(cube.n_sta, bool)
+    fallback[0] = True
+    cube = replace(cube, fallback_fit=fallback)
+    ev = tmp_path / "B" / "m" / "validation" / "full_s0"
+    rc = tmp_path / "B" / "m" / "ridgecrest" / "60km_s0"
+    ev.mkdir(parents=True), rc.mkdir(parents=True)
+    targets = pd.DataFrame({"event": [0, 0, 0], "station": ["S000", "S007", "S014"], "role": "seen",
+                            "rho": [0.1, 0.5, 0.7], "shape": 0.9, "t50_error_days": 0.0, "projection": [1, 2, 3],
+                            "signal_energy": [10, 4, 4], "crps_planted": 0.3, "crps_original": 0.3,
+                            "cover90_planted": 0.9})
+    targets.to_csv(ev / "targets.csv", index=False)
+    (ev / "summary.json").write_text(json.dumps({"method": "m", **summarise_b(targets)}))
+    ridge = pd.DataFrame({"station": ["S000", "S007"], "observed_h_mm": [8.0, 9.0], "recovered_h": [0.1, 0.9],
+                          "error_h_mm": [9.0, 1.0], "inside90_h": [0.0, 1.0]})
+    ridge.to_csv(rc / "targets.csv", index=False)
+    (rc / "summary.json").write_text(json.dumps({"method": "m", **summarise_ridgecrest(ridge)}))
+    assert rescore(cube, "validation", tmp_path) == 2
+    assert list(pd.read_csv(ev / "targets.csv").station) == ["S007", "S014"]
+    s = json.loads((ev / "summary.json").read_text())
+    assert s["seen_pairs"] == 2 and s["rho_median"] == pytest.approx(0.6) and s["fallback_left_out"] == 1
+    assert s["rho_pooled"] == pytest.approx(5 / 8)
+    r = json.loads((rc / "summary.json").read_text())
+    assert r["targets"] == 1 and r["targets_5mm"] == 1 and r["error_h_mm_median_5mm"] == pytest.approx(1.0)

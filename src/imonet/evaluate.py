@@ -237,12 +237,12 @@ def method_for(setup: Setup, method_name: str, density: float | None, n_samples:
         if model_dir is None:
             raise ValueError(f"{method_name} needs a trained model (--model)")
         m = DiffusionMethod(model_dir, n_samples, steps, guidance, target_noise) if method_name == "diffusion" \
-            else RegressMethod(model_dir)
+            else RegressMethod(model_dir, target_noise)
         if not np.allclose(m.scale, setup.scale, rtol=1e-4):
             raise ValueError("the model was trained with a different component scale")
-        extra = {"model": str(model_dir)}
+        extra = {"model": str(model_dir), "target_noise": target_noise}
         if method_name == "diffusion":
-            extra |= {"sampler_steps": steps, "guidance": guidance, "target_noise": target_noise}
+            extra |= {"sampler_steps": steps, "guidance": guidance}
         return m, extra
     length_km, extra = None, {}
     if method_name in ("idw", "idw+noise"):

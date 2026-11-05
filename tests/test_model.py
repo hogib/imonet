@@ -201,3 +201,29 @@ def test_item_seeds_pair_samples_across_batches(tmp_path):
     full = method.sample(b | {"item_seed": np.array([7, 8, 9])}, np.random.default_rng(0))
     one = method.sample({k: v[1:2] for k, v in b.items()} | {"item_seed": np.array([8])}, np.random.default_rng(1))
     assert np.allclose(full[1], one[0], atol=1e-4)
+
+
+def test_regress_method_withholds_or_passes_the_station_noise(tmp_path):
+    """A regress model trained with the station's noise level reads it only
+    in the given mode; unknown is the same as a batch without the level."""
+    cube = synthetic_cube()
+    cfg = TrainConfig(kind="regress", steps=2, batch=4, val_every=2, val_samples=8, samples_per_epoch=8,
+                      workers=0, length=32, net=NOISY)
+    out = train("noisy-regress", cfg, cube, tmp_path, log=lambda _: None)
+    ckpt = torch.load(out / "checkpoint.pt", map_location="cpu", weights_only=False)   # outputs start at zero: perturb
+    g = torch.Generator().manual_seed(1)
+    for k, v in ckpt["ema"].items():
+        v.add_(torch.randn(v.shape, generator=g) * 0.05)
+    torch.save(ckpt, out / "checkpoint.pt")
+    b = {k: v.numpy() for k, v in batch().items() if k != "x" and k != "x_ok"}
+    b["y"], b["y_ok"], b["y_sigma"] = b["y"][:, :, :32], b["y_ok"][:, :, :32], b["y_sigma"][:, :, :32]
+    level = b | {"target_noise": np.full((B, 3), 2.0, dtype=np.float32), "target_noise_ok": np.ones(B, bool)}
+    unknown = RegressMethod(out, target_noise="unknown").sample(level, np.random.default_rng(0))
+    given = RegressMethod(out, target_noise="given").sample(level, np.random.default_rng(0))
+    absent = RegressMethod(out, target_noise="given").sample(b, np.random.default_rng(0))
+    assert np.allclose(unknown, absent, atol=1e-5)
+    assert np.abs(given - unknown).max() > 1e-4
+    plain = train("plain-regress", TrainConfig(**{**cfg.__dict__, "net": TINY}), cube, tmp_path, log=lambda _: None)
+    with pytest.raises(ValueError, match="without the target noise"):
+        RegressMethod(plain, target_noise="given")
+    assert np.isfinite(RegressMethod(plain).sample(level, np.random.default_rng(0))).all()

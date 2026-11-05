@@ -29,7 +29,7 @@
 
 \title{imonet: technical notes\\[0.3em]\large What was done, how, with which numbers, and why}
 \author{H. Oğuz Bolat}
-\date{Status of 19 October 2026}
+\date{Status of 5 November 2026}
 
 \begin{document}
 \maketitle
@@ -212,7 +212,7 @@ Paired tests & bootstrap over stations (10,000; a station's networks resampled t
 % ======================================================================
 \section{Experiment A: hidden California stations}
 
-\textbf{Question:} how good are generated stations under ordinary conditions? \textbf{Setup:} the 173 held-out stations (107 scored: the 56 with a fallback fit are left out, and 10 fail the scoring QC) in 2020–2021, from the training stations at four densities. The validation period is tiled with 256-day windows; the last is aligned to the end and scores only new days.
+\textbf{Question:} how good are generated stations under ordinary conditions? \textbf{Setup:} the 173 held-out stations (107 scored: the 56 with a fallback fit are left out, 9 have no validation data and 1 fails the scoring QC) in 2020–2021, from the training stations at four densities. The validation period is tiled with 256-day windows; the last is aligned to the end and scores only new days.
 
 \resulttable{experiment_a_table}
 
@@ -237,10 +237,10 @@ Event kept & if $\geq$ 1 held-out station moves > 1 mm & Otherwise there is noth
 Pairing & each target generated twice with identical noise, from the planted and the original network & The difference of the two sample means isolates what the method passed on; everything else cancels. \\
 $\rho$ & $\langle d, s\rangle/\langle s, s\rangle$, horizontal, from onset to 60 days after the end & Share of the planted signal recovered (1 = all). \\
 Footprint & radius of the area with final displacement > 1 mm & To compare event size with station spacing. \\
-Ridgecrest & 13 held-out stations within 300 km with offsets $\geq$ 5 mm; offset = 10-day mean after minus before, 2 days skipped & A real earthquake, kept out of training. \\
+Ridgecrest & 12 held-out stations within 300 km with offsets $\geq$ 5 mm; offset = 10-day mean after minus before, 2 days skipped & A real earthquake, kept out of training. \\
 \end{settings}
 
-\textbf{Main findings.} Nothing is recovered unless the footprint exceeds about twice the distance to the nearest station, so shallow slow slip (footprint $\approx$ 9 km) is invisible at every density. Trained without transients, the diffusion model passed on less than the GP. After training with planted transients (v3) it recovers a median of 52\% on the full network (GP 56\%) and is best where events are 2–4 times the station gap. At Ridgecrest on a 60 km network, v3 reproduces offsets with a median error of 3.5 mm where every model trained without transients errs by 9 mm or more. For the GP the reason is visible in its covariance: learned from ordinary days, the shared regional signal fades within about 20 km, so a step seen by neighbours 14--47 km away is treated as their own noise.
+\textbf{Main findings.} Nothing is recovered unless the footprint exceeds about twice the distance to the nearest station, so shallow slow slip (footprint $\approx$ 9 km) is invisible at every density. Trained without transients, the diffusion model passed on less than the GP. After training with planted transients (v3) it recovers a median of 53\% on the full network (GP 48\%) and is best where events are 2–4 times the station gap. At Ridgecrest on a 60 km network, v3 reproduces offsets with a median error of 3.7 mm where every model trained without transients errs by 11 mm or more. Regress v2 is scored without the station's noise level, as regress is. For the GP the reason is visible in its covariance: learned from ordinary days, the shared regional signal fades within about 20 km, so a step seen by neighbours 14--47 km away is treated as their own noise.
 
 \resulttable{b_ridgecrest_table}
 
@@ -254,7 +254,7 @@ Ridgecrest & 13 held-out stations within 300 km with offsets $\geq$ 5 mm; offset
 Main period & 2013–2015, about 140 stations a day & Dense network outside the fit window. \\
 Sparse period & 2016 onward, about 17 stations a day & What remains of the network later; outside the Kahramanmaraş window. \\
 In-fit check & 2009–2015 with the trajectory fitted to 2019 & Measures what scoring inside a fit changes. \\
-Left out & 47 stations with a fallback fit & Their fit overlaps the scored days. \\
+Left out & 47 stations with a fallback fit (28 on the in-fit cube) & Their fit overlaps the scored days. \\
 \end{settings}
 
 \resulttable{c_scores_table}
@@ -266,17 +266,17 @@ Left out & 47 stations with a fallback fit & Their fit overlaps the scored days.
 % ======================================================================
 \section{Classifier two-sample test}
 
-\textbf{Question:} can a classifier tell generated windows from real ones? \textbf{Procedure} \cite{lopezpaz}: real and generated versions of the same held-out windows (validation years), split \emph{by station} into two folds, a classifier trained on one and tested on the other; accuracy 0.5 means indistinguishable, and the binomial distribution gives an exact p-value.
+\textbf{Question:} can a classifier tell generated windows from real ones? \textbf{Procedure} \cite{lopezpaz}: real and generated versions of the same held-out windows (validation years), split \emph{by station} into two folds, a classifier trained on one and tested on the other; accuracy 0.5 means indistinguishable, and the binomial distribution gives an exact p-value. That p-value treats the real and generated versions of a window as independent examples; a paired test (how often the generated version gets the higher score, 1/2 under H0) and a station-block bootstrap are recorded beside it and agree.
 
 \begin{settings}
 Windows & 256 days; training windows every 64 days, test windows not overlapping & Overlap adds training data; non-overlapping test windows keep test examples close to independent. \\
 Fairness & generated windows get the real window's gaps and the outlier screen & Neither gaps nor spikes should give a window away. \\
 Variants & marginal (the window) and conditional (+ 4 nearest neighbours) & Does it look like a GNSS series; is it consistent with its surroundings. \\
-Classifier & logistic regression on summary features (noise level, slow part, tails, autocorrelation, band powers; neighbour correlation) & With about 1,000 real windows, a neural network memorised its training data; the feature classifier still detects poor generators clearly. A small CNN is reported as a second check. \\
+Classifier & logistic regression on summary features (noise level, slow part, tails, autocorrelation, band powers; neighbour correlation) & With about 800 real windows, a neural network memorised its training data; the feature classifier still detects poor generators clearly. A small CNN is reported as a second check. \\
 Positive controls & IDW (no noise), IDW + noise, kriging + noise & Show the test has the power to detect a poor generator. \\
 \end{settings}
 
-\textbf{Results} (validation years, 506 test examples per cell; accuracy, * = significantly above 0.5 at $p < 0.05$):
+\textbf{Results} (validation years, 103 scored stations, 386 test examples = 193 windows per cell; accuracy, * = significantly above 0.5 at $p < 0.05$):
 
 \begin{center}\small
 \begin{tabular}{lcccc}
@@ -285,25 +285,25 @@ Positive controls & IDW (no noise), IDW + noise, kriging + noise & Show the test
 Generator & marginal & conditional & marginal & conditional \\
 \midrule
 \multicolumn{5}{l}{\emph{Feature classifier (primary)}} \\
-IDW (no noise) & 0.99* & 1.00* & 1.00* & 1.00* \\
-IDW + noise & 0.79* & 0.82* & 0.79* & 0.85* \\
-kriging + noise & 0.83* & 0.85* & 0.85* & 0.87* \\
-space--time GP & 0.83* & 0.86* & 0.80* & 0.82* \\
-diffusion v3 & 0.49 & 0.50 & 0.54 & 0.55* \\
-diffusion v3, level given & 0.48 & 0.47 & 0.55* & 0.55* \\
+IDW (no noise) & 0.99* & 0.99* & 0.99* & 1.00* \\
+IDW + noise & 0.78* & 0.80* & 0.80* & 0.81* \\
+kriging + noise & 0.83* & 0.84* & 0.85* & 0.86* \\
+space--time GP & 0.82* & 0.83* & 0.79* & 0.82* \\
+diffusion v3 & 0.51 & 0.52 & 0.56* & 0.57* \\
+diffusion v3, level given & 0.52 & 0.51 & 0.54 & 0.53 \\
 \addlinespace
 \multicolumn{5}{l}{\emph{CNN (second check)}} \\
-IDW (no noise) & 0.98* & 0.99* & 0.99* & 0.99* \\
-IDW + noise & 0.58* & 0.62* & 0.65* & 0.58* \\
-kriging + noise & 0.82* & 0.64* & 0.70* & 0.59* \\
-space--time GP & 0.76* & 0.60* & 0.76* & 0.58* \\
-diffusion v3 & 0.50 & 0.52 & 0.51 & 0.51 \\
-diffusion v3, level given & 0.50 & 0.52 & 0.51 & 0.50 \\
+IDW (no noise) & 0.98* & 0.99* & 0.99* & 1.00* \\
+IDW + noise & 0.58* & 0.50 & 0.60* & 0.51 \\
+kriging + noise & 0.66* & 0.57* & 0.67* & 0.60* \\
+space--time GP & 0.67* & 0.53 & 0.74* & 0.48 \\
+diffusion v3 & 0.48 & 0.48 & 0.46 & 0.48 \\
+diffusion v3, level given & 0.46 & 0.48 & 0.49 & 0.50 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{Main findings.} Every Gaussian generator, the space--time GP included, is recognised 80--87\% of the time by the feature classifier: real stations have structure that Gaussian models do not reproduce. Diffusion v3's samples are indistinguishable from real ones on the full network (0.47--0.50) and nearly so at 60 km (0.54--0.55, just significant), with or without the noise level. The CNN, weaker but in agreement, never separates diffusion samples from real ones (0.50--0.52). This is the clearest difference between the diffusion model and the GP: their CRPS differ by a few per cent, but only the GP's samples are recognisably synthetic.
+\textbf{Main findings.} Every Gaussian generator, the space--time GP included, is recognised 78--86\% of the time by the feature classifier: real stations have structure that Gaussian models do not reproduce. Diffusion v3's samples are indistinguishable from real ones on the full network (0.51--0.52). At 60 km the feature classifier separates them weakly without the noise level (0.56--0.57, $p$ = 0.03 and 0.009; paired test 0.62) and not significantly by accuracy with it (0.53--0.54; the paired test gives 0.58, $p \approx 0.04$). The CNN is weaker: it detects the Gaussian generators in the marginal variant (0.58--0.74) but not always in the conditional one, and never separates diffusion samples from real ones (0.46--0.50). This is the clearest difference between the diffusion model and the GP: their CRPS differ by a few per cent, but only the GP's samples are recognisably synthetic.
 
 % ======================================================================
 \section{Decisions that changed, and dead ends}
@@ -318,7 +318,8 @@ diffusion v3, level given & 0.50 & 0.52 & 0.51 & 0.50 \\
 \item \textbf{GP fitted to medians, not means}: fitted to mean covariances, the GP described a disturbed station (mean window variance 1.5–1.7$\times$ the median) and scored CRPS 0.326; fitted to medians, 0.312. Both are reported because the switch followed a validation result.
 \item \textbf{Türkiye fit to 2012 instead of 2019}: forced by NGL's coverage of the Turkish network (Section~\ref{sec:c}); the in-fit check shows it does not change the ranking.
 \item \textbf{Transient probability 0.5 $\to$ 0.8}: the visibility rule rejects 39\% of attempts, so 0.5 would have planted only 31\%.
-\item \textbf{CNN $\to$ feature classifier for the C2ST}: the CNN overfitted on about 450 windows per fold and returned near-0.5 accuracy for lack of learning, not for lack of difference.
+\item \textbf{Fallback-fit stations left out of every score (2026-10-30, 2026-11-05)}: first experiment A was rescored (154 $\to$ 107 stations); experiment B, Ridgecrest and the classifier test, run before, were rescored on 5 November 2026 from their stored per-target rows and cached windows (planted pairs 735 $\to$ 532 per method, Ridgecrest stations 13 $\to$ 12, classifier stations 138 $\to$ 103). Regress v2 had been evaluated with the station's noise level passed through, since the regress method had no switch to withhold it; it is now scored blind, with the given-level result as a separate row (differences under 0.5\%).
+\item \textbf{CNN $\to$ feature classifier for the C2ST}: the CNN overfitted on about 300 windows per fold and returned near-0.5 accuracy for lack of learning, not for lack of difference.
 \end{itemize}
 
 % ======================================================================

@@ -36,9 +36,10 @@ B_VARIANTS = {
     "diffusion-v3-given": ("diffusion", "diffusion v3, level given", {}),
     "regress": ("regress", "regress v1", _OLD),
     "regress-v2": ("regress", "regress v2 (transients)", {}),
+    "regress-v2-given": ("regress", "regress v2, level given", {}),
 }
 B_METHODS = {k: v[0] for k, v in B_VARIANTS.items() if k != v[0]}
-SINGLE = ("idw", "krige", "regress", "regress-v2")      # one series, no ensemble range
+SINGLE = ("idw", "krige", "regress", "regress-v2", "regress-v2-given")      # one series, no ensemble range
 
 
 def _style(name: str) -> dict:

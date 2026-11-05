@@ -418,6 +418,7 @@ TRANSIENT_MODELS = (
     ("diffusion-v3-given", "diffusion v3, level given"),
     ("regress", "regress v1"),
     ("regress-v2", "regress v2"),
+    ("regress-v2-given", "regress v2, level given"),
 )
 TRANSIENT_COLS = (("crps_fast", "CRPS$_f$"), ("nrmse_fast", "nRMSE$_f$"), ("energy_total", "ES"),
                   ("cover90_fast", "Cov.$_{90,f}$"), ("spread_skill", "S/E"),

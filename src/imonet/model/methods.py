@@ -69,16 +69,27 @@ class DiffusionMethod(Method):
 class RegressMethod(Method):
     name = "regress"
 
-    def __init__(self, model_dir: Path):
-        kind, net, _, self.scale = load(model_dir)
+    def __init__(self, model_dir: Path, target_noise: str = "unknown"):
+        """target_noise as for `DiffusionMethod`: "given" passes the target
+        station's noise level to a model trained with it, "unknown" withholds
+        it (a model trained without the level ignores it either way)."""
+        kind, net, cfg, self.scale = load(model_dir)
         if kind != "regress":
             raise ValueError(f"{model_dir} is a {kind} model")
+        if target_noise not in ("given", "unknown"):
+            raise ValueError(f"target_noise must be given or unknown, not {target_noise}")
+        if target_noise == "given" and not cfg.net.station_noise:
+            raise ValueError(f"{model_dir} was trained without the target noise level")
+        self.target_noise = target_noise
         self.model = Regress(net)
         self.device = next(net.parameters()).device
 
     @torch.no_grad()
     def sample(self, batch, rng):
         cond = to_torch(batch, self.device)
+        if self.target_noise == "unknown":
+            cond.pop("target_noise", None)
+            cond.pop("target_noise_ok", None)
         with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
             x = self.model.predict(cond, batch["y"].shape[2])
         return x.float().cpu().numpy()[:, None]

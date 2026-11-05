@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from imonet.cube import CALIFORNIA, TEST, VALIDATION, Cube
+from imonet.cube import CALIFORNIA, HELD_OUT, TEST, VALIDATION, Cube
 from imonet.evaluate import DENSITIES, RESULTS, THIN_SEEDS, Setup, density_name, report, run
 from imonet.figures import FIGURES
 from imonet.ngl import REGIONS, STEPS, WORKERS, read_steps
@@ -91,6 +91,9 @@ def _c2st(a) -> None:
         if cached.exists():
             with np.load(cached) as z:
                 w = {k: z[k] for k in z.files}
+            w, dropped = c2st.filter_windows(w, setup)      # scoring rules may have changed since
+            if dropped:
+                say(f"{label} {density_name(d)}: {dropped} cached stations no longer scored, left out")
         else:
             say(f"{label} {density_name(d)}: generating windows")
             w = c2st.make_windows(setup, a.method, d, 0, a.results, a.model, a.target_noise, progress=say)
@@ -106,7 +109,8 @@ def _c2st(a) -> None:
             ex.to_csv(out / "examples.csv", index=False)
             say(f"{label} {density_name(d)} {variant} {clf}: accuracy {summary['accuracy']:.3f} "
                 f"[{summary['ci_low']:.3f}, {summary['ci_high']:.3f}], p = {summary['p_value']:.2g}, "
-                f"{summary['test_examples']} test examples")
+                f"{summary['test_examples']} test examples; paired {summary['paired_accuracy']:.3f}, "
+                f"p = {summary['paired_p_value']:.2g}, {summary['windows']} windows")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -171,6 +175,8 @@ def main(argv: list[str] | None = None) -> None:
 
     rs = sub.add_parser("rescore", help="recompute run summaries from their per-station scores")
     rs.add_argument("--split", choices=list(SPLITS), default="validation")
+    rs.add_argument("--experiment", choices=["A", "B"], default="A",
+                    help="A: runs/A summaries; B: planted events and Ridgecrest (runs/B)")
 
     r = sub.add_parser("report", help="print the experiment A table")
     r.add_argument("--split", choices=list(SPLITS), default="validation")
@@ -280,6 +286,10 @@ def main(argv: list[str] | None = None) -> None:
                       f"stations, sign test p = {r['sign_p']:.2g} ({r['seeds']} networks)")
         return
     if a.cmd == "rescore":
+        if a.experiment == "B":
+            from imonet.experiment_b import rescore as rescore_b
+            print(f"rescored {rescore_b(Cube.load(a.cube), a.split, a.results)} runs of experiment B")
+            return
         from imonet.evaluate import rescore
         print(f"rescored {rescore(Cube.load(a.cube), a.split, a.results)} runs")
         return
@@ -309,7 +319,10 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     setup = Setup(Cube.load(a.cube), read_steps(a.steps_file))
-    print(f"scoring QC drops {len(setup.qc_dropped)} stations")
+    held = set(setup.cube.sta[setup.cube.stations(HELD_OUT)].astype(str))
+    n_held = int(setup.qc_dropped.sta.isin(held).sum()) if len(setup.qc_dropped) else 0
+    print(f"scoring QC drops {len(setup.qc_dropped)} stations of the cube ({n_held} held out); "
+          f"{setup.fallback_left_out} fallback-fit stations left out")
     for d in map(_density, a.density):
         for seed in ([0] if d is None else range(a.seeds)):
             for s in run(setup, a.method, SPLITS[a.split], a.split, d, seed, a.samples, a.results, a.model,

@@ -7,6 +7,11 @@ classifier on the first, and take its accuracy t̂ on the second. Under
 H0 (real and generated equal in distribution) n_te·t̂ is Binomial(n_te,
 1/2), which gives an exact p-value; an accuracy near 0.5 means the
 classifier cannot tell them apart. Its predictions show where they differ.
+Here the examples come in pairs (the real and the generated version of one
+window), which that p-value treats as independent; a paired test
+(`paired_accuracy`, `paired_p_value`: how often the generated version gets
+the higher score, 1/2 under H0) and a station-block bootstrap of the
+accuracy are reported beside it.
 
 Here:
 
@@ -125,6 +130,18 @@ def make_windows(setup: Setup, method_name: str, density: float | None, seed: in
         if progress:
             progress(f"  windows starting {off} days into the period: {len(out['t0'])} so far")
     return {k: np.asarray(v) for k, v in out.items()}
+
+
+def filter_windows(w: dict, setup: Setup) -> tuple[dict, int]:
+    """The windows of the stations `setup` scores (QC and fallback fits, as
+    `make_windows` applies them when generating), for windows cached before
+    a rule changed. Returns (windows, stations dropped)."""
+    pos = {str(s): i for i, s in enumerate(setup.cube.sta)}
+    ok = np.array([bool(setup.keep[pos[s]]) for s in w["station"].astype(str)], dtype=bool)
+    dropped = len(set(w["station"][~ok].astype(str)))
+    if ok.all():
+        return w, 0
+    return {k: v[ok] for k, v in w.items()}, dropped
 
 
 def features(w: dict, idx: np.ndarray, variant: str) -> tuple[np.ndarray, np.ndarray]:
@@ -353,6 +370,15 @@ def run(w: dict, variant: str, cfg: TrainConfig = TrainConfig(), device=None, lo
     ex = pd.DataFrame(rows)
     correct = ((ex.p_generated > 0.5).astype(int) == ex.generated)
     n, c = len(ex), int(correct.sum())
+    # Paired test: the real and generated versions of a window are one trial.
+    # Under H0 they are exchangeable, so the generated one gets the higher
+    # p_generated with probability 1/2 (ties left out); this does not treat
+    # the two versions as independent examples, as the binomial above does.
+    key = ["station", "t0"]
+    pg = ex[ex.generated == 1].set_index(key).p_generated
+    pr = ex[ex.generated == 0].set_index(key).p_generated.reindex(pg.index)
+    decided = pg != pr
+    pair_wins, pairs = int((pg[decided] > pr[decided]).sum()), int(decided.sum())
     # station-block bootstrap of the accuracy (windows of a station are not independent)
     by_station = correct.groupby(ex.station).agg(["sum", "count"])
     boot = []
@@ -362,6 +388,8 @@ def run(w: dict, variant: str, cfg: TrainConfig = TrainConfig(), device=None, lo
     lo, hi = np.quantile(boot, [0.025, 0.975])
     summary = {"variant": variant, "classifier": cfg.classifier, "test_examples": n, "accuracy": c / n, "ci_low": float(lo), "ci_high": float(hi),
                "p_value": binomial_two_sided(c, n), "stations": int(len(stations)),
+               "windows": int(len(pg)), "paired_accuracy": pair_wins / max(pairs, 1),
+               "paired_p_value": binomial_two_sided(pair_wins, pairs),
                "accuracy_real": float(correct[ex.generated == 0].mean()),
                "accuracy_generated": float(correct[ex.generated == 1].mean())}
     return summary, ex

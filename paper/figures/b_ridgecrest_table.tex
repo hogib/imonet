@@ -3,16 +3,17 @@
  & \multicolumn{3}{c}{full} & \multicolumn{3}{c}{60~km} \\
 Method & Recovered & Error (mm) & In 90\% & Recovered & Error (mm) & In 90\% \\
 \midrule
-idw & 1.12 & 3.7 & -- & 0.09 & 9.8 & -- \\
-idw + noise & 1.12 & 3.7 & 0.15 & 0.10 & 9.8 & 0.15 \\
-diffusion v1 & 0.64 & 5.1 & 0.77 & 0.24 & 10.9 & 0.58 \\
-diffusion v2 & 0.53 & 7.0 & 0.65 & 0.14 & 12.2 & 0.58 \\
-diffusion v2, level given & 0.54 & 5.3 & 0.65 & 0.14 & 11.1 & 0.54 \\
-diffusion v3 (transients) & 0.85 & 2.7 & 0.81 & 0.68 & 3.5 & 0.81 \\
-diffusion v3, level given & 0.85 & 2.7 & 0.81 & 0.73 & 3.6 & 0.81 \\
-regress v1 & 0.69 & 4.0 & -- & 0.20 & 11.3 & -- \\
-regress v2 (transients) & 0.95 & 3.2 & -- & 0.88 & 5.8 & -- \\
-krige + noise & 1.01 & 3.6 & 0.19 & 0.11 & 9.4 & 0.08 \\
-space--time GP & 1.08 & 2.7 & 0.15 & 0.21 & 9.1 & 0.08 \\
+idw & 1.02 & 3.5 & -- & 0.10 & 12.7 & -- \\
+idw + noise & 1.02 & 3.6 & 0.17 & 0.11 & 12.5 & 0.17 \\
+diffusion v1 & 0.64 & 5.3 & 0.75 & 0.23 & 11.4 & 0.54 \\
+diffusion v2 & 0.51 & 7.4 & 0.62 & 0.13 & 12.3 & 0.54 \\
+diffusion v2, level given & 0.48 & 6.5 & 0.62 & 0.12 & 11.3 & 0.50 \\
+diffusion v3 (transients) & 0.85 & 2.2 & 0.79 & 0.61 & 3.7 & 0.79 \\
+diffusion v3, level given & 0.85 & 2.5 & 0.79 & 0.66 & 3.7 & 0.79 \\
+regress v1 & 0.67 & 4.9 & -- & 0.19 & 11.4 & -- \\
+regress v2 (transients) & 0.95 & 2.9 & -- & 0.83 & 5.7 & -- \\
+regress v2, level given & 0.93 & 3.1 & -- & 0.87 & 6.4 & -- \\
+krige + noise & 0.98 & 3.3 & 0.21 & 0.12 & 12.1 & 0.08 \\
+space--time GP & 1.03 & 2.7 & 0.17 & 0.22 & 11.1 & 0.04 \\
 \bottomrule
 \end{tabular}

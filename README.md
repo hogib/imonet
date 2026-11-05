@@ -25,6 +25,14 @@ station table and step catalogue of 2026-10-06 (a newer catalogue can list
 new steps and change the cube).
 Results of runs go to `runs/` (not tracked).
 
+When a scoring rule changes, `imonet rescore` (experiment A) and `imonet
+rescore --experiment B` recompute the stored summaries without new samples;
+the classifier test filters its cached windows when rerun. The tables the
+documents `\input` then follow from `imonet figures`, but numbers quoted in
+the prose of `paper/report.tex`, `notes/technical-notes.tex` and
+`docs/00-design.md` do not: grep them for the old headline values before
+committing a rescore.
+
 ## License
 
 The code is released under the MIT License (`LICENSE`). The paper, report and

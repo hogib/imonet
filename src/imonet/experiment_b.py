@@ -438,8 +438,16 @@ def ridgecrest(setup: Setup, method_name: str, density: float | None, seed: int,
     out = root / "B" / (label or method_name) / "ridgecrest" / f"{density_name(density)}_s{seed}"
     out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / "targets.csv", index=False)
-    summary = {"method": label or method_name, "density": density_name(density), "seed": seed, "targets": len(df),
-               **extra}
+    summary = {"method": label or method_name, "density": density_name(density), "seed": seed, **extra,
+               **summarise_ridgecrest(df)}
+    (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
+    return df
+
+
+def summarise_ridgecrest(df: pd.DataFrame) -> dict:
+    """Medians over the stations with observed horizontal offsets of at
+    least 1 and 5 mm."""
+    summary: dict = {"targets": int(len(df))}
     for mm in (1.0, 5.0):
         sub = df[df.observed_h_mm >= mm] if len(df) else df
         tag = f"{mm:g}mm"
@@ -447,5 +455,28 @@ def ridgecrest(setup: Setup, method_name: str, density: float | None, seed: int,
                     f"recovered_h_median_{tag}": float(sub.recovered_h.median()) if len(sub) else None,
                     f"error_h_mm_median_{tag}": float(sub.error_h_mm.median()) if len(sub) else None,
                     f"inside90_h_{tag}": float(sub.inside90_h.mean()) if len(sub) else None}
-    (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
-    return df
+    return summary
+
+
+def rescore(cube: Cube, split_name: str = "validation", root: Path = RESULTS) -> int:
+    """Drop the fallback-fit stations from every stored per-target table of
+    the planted events (targets.csv of `run`) and of Ridgecrest, and
+    recompute their summaries, as `evaluate.rescore` does for experiment A:
+    `Setup` leaves those stations out now, and the samples are long gone.
+    Returns the runs updated."""
+    fallback = set(map(str, cube.sta[cube.fallback_fit])) if len(cube.fallback_fit) else set()
+    n = 0
+    for kind, pattern in (("events", f"*/{split_name}/*/targets.csv"), ("ridgecrest", "*/ridgecrest/*/targets.csv")):
+        for path in sorted((root / "B").glob(pattern)):
+            df = pd.read_csv(path)
+            if df.empty or "station" not in df:
+                continue
+            df = df[~df["station"].astype(str).isin(fallback)]
+            df.to_csv(path, index=False)
+            summary_path = path.parent / "summary.json"
+            summary = json.loads(summary_path.read_text())
+            summary |= (summarise_b(df) if kind == "events" else summarise_ridgecrest(df))
+            summary["fallback_left_out"] = len(fallback)
+            summary_path.write_text(json.dumps(summary, indent=1, default=str))
+            n += 1
+    return n

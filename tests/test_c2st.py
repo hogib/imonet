@@ -36,3 +36,21 @@ def test_same_distribution_is_at_chance_and_different_is_detected(clf):
     diff, _ = run(windows(1.6), "marginal", cfg, dev)
     assert 0.35 < same["accuracy"] < 0.65 and same["p_value"] > 0.01
     assert diff["accuracy"] > 0.9 and diff["p_value"] < 1e-6
+
+
+def test_paired_test_and_filtering():
+    from types import SimpleNamespace
+    from imonet.c2st import filter_windows
+    cfg = TrainConfig(classifier="features")
+    same, ex = run(windows(1.0), "marginal", cfg, torch.device("cpu"))
+    assert same["windows"] == 120 and 0.35 < same["paired_accuracy"] < 0.65 and same["paired_p_value"] > 0.01
+    diff, _ = run(windows(1.6), "marginal", cfg, torch.device("cpu"))
+    assert diff["paired_accuracy"] > 0.9 and diff["paired_p_value"] < 1e-6
+    w = windows(1.0)
+    sta = np.array(sorted(set(w["station"])))
+    keep = np.ones(len(sta), bool)
+    keep[[0, 1]] = False
+    setup = SimpleNamespace(cube=SimpleNamespace(sta=sta), keep=keep)
+    out, dropped = filter_windows(w, setup)
+    assert dropped == 2 and len(out["t0"]) == len(w["t0"]) - 12 and not np.isin(out["station"], sta[:2]).any()
+    assert filter_windows(w, SimpleNamespace(cube=SimpleNamespace(sta=sta), keep=np.ones(len(sta), bool)))[1] == 0

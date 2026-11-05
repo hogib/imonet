@@ -418,8 +418,8 @@ How they are computed (`imonet.metrics`, `imonet.evaluate`):
   median over stations; a component-free name (`nrmse_fast`) is the mean of
   the E, N, U medians. The same stations and days are left out: days within
   ±30 of an M ≥ 6 earthquake NGL lists for the station (fast and slow parts
-  only), and stations failing gnssdl's scoring QC (19 of the 173 held-out
-  stations on the California cube). Check: `zero` scores a fast nRMSE of
+  only), and stations failing gnssdl's scoring QC (19 of the 1251 stations of the
+  California cube, 1 of them held out). Check: `zero` scores a fast nRMSE of
   0.729 on the held-out stations, gnssdl's M0 0.728.
 - **Fast and slow parts.** The slow part is the 61-day running median over
   the scored days. nRMSE splits the error of the sample mean, as gnssdl.
@@ -616,6 +616,18 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   0.68–0.73, 3.5 mm vs ≥ 9.1 mm for every model without transients (GP's
   covariance decays within 5–21 km). v3 is the model carried forward.
   GP now run on all 7 B networks (`eval-b --skip-done`).
+- Fallback-fit exclusion and regress v2 (2026-11-05). The exclusion of
+  2026-10-30 had been applied to A only; B, Ridgecrest and the C2ST were
+  rescored from their stored rows (`imonet rescore --experiment B`; the
+  C2ST filters its cached windows when rerun): 532 planted pairs per
+  method, 12 Ridgecrest stations, 103 C2ST stations. Full network median
+  ρ: v3 0.53, GP 0.48, v2 0.35; >4× gap over all networks 0.57 for both;
+  Ridgecrest 60 km v3 0.61–0.66, 3.7 mm vs ≥ 11.1 mm. C2ST at 60 km now
+  separates v3 weakly (features 0.56–0.57 without the level, p < 0.03).
+  `regress-v2` had been evaluated with the target's noise level passed
+  through (`RegressMethod` had no switch); now blind by default, with
+  `--target-noise given` as a separate run (differences < 0.5%). The B
+  numbers of 2026-10-17/18 below predate both changes.
 - Experiment C (2026-10-18, `imonet eval-c`, nothing tuned on Türkiye):
   main period 2013–2015 (dense network, fit to 2012): diffusion v3 fast CRPS
   0.369 (level given 0.368) vs GP 0.376 (0.375), IDW/kriging + noise 0.380;
