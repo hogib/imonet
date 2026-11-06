@@ -109,11 +109,14 @@ def paired(xa: np.ndarray, xb: np.ndarray, seed: int = 0, n_boot: int = N_BOOT) 
 DENSITY_ORDER = ("full", "25km", "60km", "100km")
 TABLE_PAIRS = (("diffusion", "idw+noise"), ("diffusion", "krige+noise"), ("diffusion", "gp"),
                ("diffusion-v2-given", "gp-given"), ("diffusion-v3-unknown", "gp"), ("diffusion-v3-given", "gp-given"),
-               ("diffusion-v3-given", "diffusion-v2-given"), ("diffusion-v3-unknown", "diffusion-v2-unknown"))
+               ("diffusion-v3-given", "diffusion-v2-given"), ("diffusion-v3-unknown", "diffusion-v2-unknown"),
+               ("diffusion-v3-s1-unknown", "diffusion-v3-unknown"), ("diffusion-v3-s1-given", "diffusion-v3-given"),
+               ("diffusion-v3-s1-unknown", "gp"), ("diffusion-v3-s1-given", "gp-given"))
 LABELS = {"diffusion": "diffusion v1", "idw+noise": "IDW + noise", "krige+noise": "kriging + noise",
           "gp": "GP", "diffusion-v2-given": "diffusion v2 (given)", "gp-given": "GP (given)",
           "diffusion-v3-given": "diffusion v3 (given)", "diffusion-v2-unknown": "diffusion v2 (unknown)",
-          "diffusion-v3-unknown": "diffusion v3 (unknown)"}
+          "diffusion-v3-unknown": "diffusion v3 (unknown)", "diffusion-v3-s1-unknown": "diffusion v3, seed 1 (unknown)",
+          "diffusion-v3-s1-given": "diffusion v3, seed 1 (given)"}
 
 
 def table(out: Path, split: str = "validation", root: Path = RESULTS, score: str = "crps_fast",

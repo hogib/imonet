@@ -194,3 +194,30 @@ def test_templates_load():
     assert set(tps) == {"afterslip", "shallow slow slip"}
     assert tps["afterslip"].time == "log" and tps["afterslip"].slip_m == (0.10, 0.40)
     assert tps["shallow slow slip"].time == "propagating"
+
+
+def test_nearly_vertical_edges_are_snapped_and_the_far_field_decays():
+    """A CFM triangle whose vertical edge is off by 1 mm after the projection
+    round trip (Big Bear rupture): Nikkhoo & Walter's half-space solution
+    gives a far field that does not decay; snapped to exactly vertical it is
+    a point-source-sized value."""
+    t = np.array([[-6076.428, 5182.125, -8776.48], [-6696.844, 5786.853, -8288.898],
+                  [-6076.429, 5182.125, -7801.316]])
+    far = np.array([[400 * KM, 0, 0], [0, -500 * KM, 0], [-300 * KM, 300 * KM, 0]])
+    raw = np.abs(events.displacement(far, t[None], np.array([0.35]), 0.0)).max()
+    snapped = events.snap_vertical(t)
+    assert np.array_equal(snapped[0, :2], snapped[2, :2]) and np.array_equal(snapped[:, 2], t[:, 2])
+    assert np.abs(snapped - t).max() < 1e-3
+    fixed = np.abs(events.displacement(far, snapped[None], np.array([0.35]), 0.0)).max()
+    assert raw > 1e-4                      # about 1 mm (metres here): the ill-conditioned case
+    assert fixed < 1e-6                    # about 2e-4 mm, the size of a point source of this moment
+
+
+def test_snap_vertical_leaves_separate_vertices_alone():
+    v = np.array([[0, 0, -1000.], [0.2, 0.1, -2000.], [5, 0, -1000.], [0.3, 0.6, -3000.]])
+    out = events.snap_vertical(v, tol_m=0.5)
+    np.testing.assert_allclose(out[0, :2], out[1, :2])
+    np.testing.assert_allclose(out[0, :2], [0.1, 0.05])
+    np.testing.assert_array_equal(out[2], v[2])
+    np.testing.assert_array_equal(out[3], v[3])          # 0.58 m from the first: kept apart
+    np.testing.assert_array_equal(out[:, 2], v[:, 2])

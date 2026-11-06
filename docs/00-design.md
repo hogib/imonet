@@ -628,6 +628,21 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   through (`RegressMethod` had no switch); now blind by default, with
   `--target-noise given` as a separate run (differences < 0.5%). The B
   numbers of 2026-10-17/18 below predate both changes.
+- Second seed, grid fill-ins, event-geometry fix, experiment B with 60
+  events per template (2026-11-06). `diffusion-v3-s1` (v3 retrained with
+  seed 1): val loss 0.580 (0.581), experiment A within 0.2% of seed 0 in
+  CRPS (intervals include zero), same lead over the GP. Diffusion v2 and v3
+  now evaluated at 25 and 100 km as well (v3 vs GP −3.6/−3.3%); C2ST at 25
+  and 100 km (v3 indistinguishable at 25 km, 0.55–0.57 at 100 km). Bug:
+  CFM vertical edges end up ~1 mm off vertical after the coordinate
+  conversion, and cutde's half-space solution is ill-conditioned for such
+  sides (far field does not decay; one event moved 978 stations > 1 mm
+  instead of 35). Fixed by `events.snap_vertical` (vertices within 0.5 m
+  horizontally share x, y); 4 of the 120 planned events were affected (1 of
+  the old 60). Experiment B replanned (60 per template) and rerun: full
+  network median ρ v3 0.41, GP 0.37, v2 0.23; over all networks v3 exceeds
+  the GP for footprints > 4× the gap (0.62 vs 0.57) and 2–4× (0.22 vs
+  0.10). The B numbers in the entries above predate this.
 - Experiment C (2026-10-18, `imonet eval-c`, nothing tuned on Türkiye):
   main period 2013–2015 (dense network, fit to 2012): diffusion v3 fast CRPS
   0.369 (level given 0.368) vs GP 0.376 (0.375), IDW/kriging + noise 0.380;

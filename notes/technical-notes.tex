@@ -162,6 +162,7 @@ Validation & every 2,000 steps on 1,024 fixed held-out windows, at fixed noise l
 diffusion v1 & as above & First model. Validation loss 0.582. \\
 diffusion v2 & + the target station's noise level as an optional input (4 numbers $\to$ small network $\to$ added to the noise embedding; zero at start; hidden in 30\% of samples) & v1's samples were too wide at quiet stations and too narrow at noisy ones: the neighbours do not reveal how noisy a station is, so the model hedged. Hiding it in 30\% keeps a model that works without it. Validation loss 0.582. \\
 diffusion v3 (carried forward) & v2 + planted synthetic transients (Section~\ref{sec:transients}) & v1 and v2 passed on little of localised signal (experiment B). Validation loss 0.581. \\
+diffusion v3, seed 1 & v3 retrained with seed 1 & Checks that the results are not an accident of one training run. Validation loss 0.580; experiment A within 0.2\% of seed 0 (intervals include zero). \\
 regress v1 / v2 & the same network trained with squared error, one output, 50,000 steps; v2 with v3's training data & Shows what the generative formulation adds beyond its own best single prediction. Validation error flattened within 10,000 steps. \\
 \end{settings}
 
@@ -221,6 +222,7 @@ Paired tests & bootstrap over stations (10,000; a station's networks resampled t
 \item Point accuracy barely depends on density (IDW fast nRMSE 0.560 full, 0.565 at 60 km): the shared short-period signal is a common mode that even a sparse network samples well.
 \item Adding noise makes the averages calibrated generators (CRPS 0.421 $\to$ 0.308 for IDW).
 \item The diffusion model has the lowest CRPS at every density (0.301 at 60 km against 0.312 for the GP and 0.310 for IDW + noise), better at about 100 of 107 stations; it reproduces the fall of inter-station correlation with distance, as do kriging + noise and the GP, but not IDW + noise.
+\item A second training seed of v3 scores within 0.2\% of the first in CRPS at full density and 60 km (intervals include zero) and keeps the same lead over the GP.
 \item v1 was too wide at the median station (spread/error 1.26–1.33) because it cannot know a station's noise level; v2 with the level given is calibrated across noise quartiles (1.03–1.16). v3 scores as v2 (paired differences under 0.5\%).
 \end{itemize}
 
@@ -232,7 +234,7 @@ Paired tests & bootstrap over stations (10,000; a station's networks resampled t
 \textbf{Question:} is a localised signal at the neighbours passed on to the virtual station? \textbf{Setup:} 60 events on real fault surfaces of the SCEC Community Fault Model, displacements from triangular dislocations in an elastic half-space (Poisson's ratio 0.25).
 
 \begin{settings}
-Templates & 30 shallow slow-slip events (8–25 km long, to 2–4 km depth, 0.8–4.5 cm, propagating 0.4–9 km/day) and 30 afterslip events (15–50 km, 5–12 km deep, 10–40 cm, $\log(1+t/\tau)$, $\tau$ = 17–34 days, one year) & Values from published events \cite{materna,vavra,gonzalez}; $\tau$ spans the decay times reported for El Mayor–Cucapah (20 $\pm$ 3 days) and Hector Mine (26 $\pm$ 8). \\
+Templates & 60 shallow slow-slip events (8–25 km long, to 2–4 km depth, 0.8–4.5 cm, propagating 0.4–9 km/day) and 60 afterslip events (15–50 km, 5–12 km deep, 10–40 cm, $\log(1+t/\tau)$, $\tau$ = 17–34 days, one year) & Values from published events \cite{materna,vavra,gonzalez}; $\tau$ spans the decay times reported for El Mayor–Cucapah (20 $\pm$ 3 days) and Hector Mine (26 $\pm$ 8). \\
 Event kept & if $\geq$ 1 held-out station moves > 1 mm & Otherwise there is nothing to recover. \\
 Pairing & each target generated twice with identical noise, from the planted and the original network & The difference of the two sample means isolates what the method passed on; everything else cancels. \\
 $\rho$ & $\langle d, s\rangle/\langle s, s\rangle$, horizontal, from onset to 60 days after the end & Share of the planted signal recovered (1 = all). \\
@@ -240,7 +242,7 @@ Footprint & radius of the area with final displacement > 1 mm & To compare event
 Ridgecrest & 12 held-out stations within 300 km with offsets $\geq$ 5 mm; offset = 10-day mean after minus before, 2 days skipped & A real earthquake, kept out of training. \\
 \end{settings}
 
-\textbf{Main findings.} Nothing is recovered unless the footprint exceeds about twice the distance to the nearest station, so shallow slow slip (footprint $\approx$ 9 km) is invisible at every density. Trained without transients, the diffusion model passed on less than the GP. After training with planted transients (v3) it recovers a median of 53\% on the full network (GP 48\%) and is best where events are 2–4 times the station gap. At Ridgecrest on a 60 km network, v3 reproduces offsets with a median error of 3.7 mm where every model trained without transients errs by 11 mm or more. Regress v2 is scored without the station's noise level, as regress is. For the GP the reason is visible in its covariance: learned from ordinary days, the shared regional signal fades within about 20 km, so a step seen by neighbours 14--47 km away is treated as their own noise.
+\textbf{Main findings.} Nothing is recovered unless the footprint exceeds about twice the distance to the nearest station, so shallow slow slip (footprint $\approx$ 11 km) is invisible at every density. Trained without transients, the diffusion model passed on less than the GP. After training with planted transients (v3) it recovers a median of 41\% on the full network (GP 37\%) and is best over the thinned networks where events are 2–4 times the station gap (22\% against 10\%). At Ridgecrest on a 60 km network, v3 reproduces offsets with a median error of 3.7 mm where every model trained without transients errs by 11 mm or more. Regress v2 is scored without the station's noise level, as regress is. For the GP the reason is visible in its covariance: learned from ordinary days, the shared regional signal fades within about 20 km, so a step seen by neighbours 14--47 km away is treated as their own noise.
 
 \resulttable{b_ridgecrest_table}
 
@@ -303,7 +305,32 @@ diffusion v3, level given & 0.46 & 0.48 & 0.49 & 0.50 \\
 \end{tabular}
 \end{center}
 
-\textbf{Main findings.} Every Gaussian generator, the space--time GP included, is recognised 78--86\% of the time by the feature classifier: real stations have structure that Gaussian models do not reproduce. Diffusion v3's samples are indistinguishable from real ones on the full network (0.51--0.52). At 60 km the feature classifier separates them weakly without the noise level (0.56--0.57, $p$ = 0.03 and 0.009; paired test 0.62) and not significantly by accuracy with it (0.53--0.54; the paired test gives 0.58, $p \approx 0.04$). The CNN is weaker: it detects the Gaussian generators in the marginal variant (0.58--0.74) but not always in the conditional one, and never separates diffusion samples from real ones (0.46--0.50). This is the clearest difference between the diffusion model and the GP: their CRPS differ by a few per cent, but only the GP's samples are recognisably synthetic.
+At 25 and 100 km (same stations and windows; IDW without noise not run):
+
+\begin{center}\small
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{25 km} & \multicolumn{2}{c}{100 km} \\
+Generator & marginal & conditional & marginal & conditional \\
+\midrule
+\multicolumn{5}{l}{\emph{Feature classifier (primary)}} \\
+IDW + noise & 0.78* & 0.82* & 0.83* & 0.87* \\
+kriging + noise & 0.88* & 0.87* & 0.90* & 0.92* \\
+space--time GP & 0.82* & 0.84* & 0.82* & 0.86* \\
+diffusion v3 & 0.51 & 0.50 & 0.55* & 0.56* \\
+diffusion v3, level given & 0.51 & 0.51 & 0.55* & 0.57* \\
+\addlinespace
+\multicolumn{5}{l}{\emph{CNN (second check)}} \\
+IDW + noise & 0.61* & 0.49 & 0.67* & 0.51 \\
+kriging + noise & 0.65* & 0.49 & 0.75* & 0.69* \\
+space--time GP & 0.68* & 0.52 & 0.55 & 0.50 \\
+diffusion v3 & 0.48 & 0.48 & 0.51 & 0.51 \\
+diffusion v3, level given & 0.52 & 0.49 & 0.51 & 0.51 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Main findings.} Every Gaussian generator, the space--time GP included, is recognised 78--86\% of the time by the feature classifier: real stations have structure that Gaussian models do not reproduce. Diffusion v3's samples are indistinguishable from real ones on the full network (0.51--0.52). At 60 km the feature classifier separates them weakly without the noise level (0.56--0.57, $p$ = 0.03 and 0.009; paired test 0.62) and not significantly by accuracy with it (0.53--0.54; the paired test gives 0.58, $p \approx 0.04$). Over the four densities the pattern is consistent: diffusion samples cannot be told apart on the full network and at 25 km, and the feature classifier separates them weakly (0.55--0.57) at 60 and 100 km, with the noise level as without it at 100 km. The CNN is weaker: it detects the Gaussian generators in the marginal variant (0.58--0.74) but not always in the conditional one, and never separates diffusion samples from real ones (0.46--0.50). This is the clearest difference between the diffusion model and the GP: their CRPS differ by a few per cent, but only the GP's samples are recognisably synthetic.
 
 % ======================================================================
 \section{Decisions that changed, and dead ends}
@@ -319,6 +346,7 @@ diffusion v3, level given & 0.46 & 0.48 & 0.49 & 0.50 \\
 \item \textbf{Türkiye fit to 2012 instead of 2019}: forced by NGL's coverage of the Turkish network (Section~\ref{sec:c}); the in-fit check shows it does not change the ranking.
 \item \textbf{Transient probability 0.5 $\to$ 0.8}: the visibility rule rejects 39\% of attempts, so 0.5 would have planted only 31\%.
 \item \textbf{Fallback-fit stations left out of every score (2026-10-30, 2026-11-05)}: first experiment A was rescored (154 $\to$ 107 stations); experiment B, Ridgecrest and the classifier test, run before, were rescored on 5 November 2026 from their stored per-target rows and cached windows (planted pairs 735 $\to$ 532 per method, Ridgecrest stations 13 $\to$ 12, classifier stations 138 $\to$ 103). Regress v2 had been evaluated with the station's noise level passed through, since the regress method had no switch to withhold it; it is now scored blind, with the given-level result as a separate row (differences under 0.5\%).
+\item \textbf{Nearly vertical fault edges (2026-11-06)}: CFM vertical edges end up about 1 mm off vertical after the coordinate conversion, and the half-space dislocation solution is ill-conditioned for such triangle sides: its far field stops decaying (one afterslip event moved 978 stations by more than 1 mm instead of 35). Vertices within 0.5 m horizontally now share one position (\texttt{events.snap\_vertical}); 4 of the 120 planned events were affected, and experiment B was replanned with 60 events per template and rerun.
 \item \textbf{CNN $\to$ feature classifier for the C2ST}: the CNN overfitted on about 300 windows per fold and returned near-0.5 accuracy for lack of learning, not for lack of difference.
 \end{itemize}
 

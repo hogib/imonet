@@ -139,14 +139,51 @@ def displacement(obs_xyz: np.ndarray, tri_xyz: np.ndarray, slip_m: np.ndarray,
     return np.einsum("nimj,mj->ni", mat, comp)
 
 
+SNAP_M = 0.5                      # vertices closer than this horizontally share one x, y
+
+
+def snap_vertical(v: np.ndarray, tol_m: float = SNAP_M) -> np.ndarray:
+    """Vertices (V×3, local metres) with every group of vertices closer
+    than `tol_m` horizontally moved to their mean x, y (z kept).
+
+    CFM surfaces have vertical edges, but converting their UTM vertices to
+    longitude/latitude and into an event's frame leaves those edges off
+    vertical by about a millimetre. Nikkhoo & Walter's half-space solution
+    is ill-conditioned for a triangle with such a nearly vertical side: its
+    displacement no longer decays with distance (about 10 mm at 400 km from
+    a 0.4 km² triangle with 0.35 m of slip, against 1e-4 mm), and summed
+    over a patch the errors leave a near-uniform offset over the whole
+    network. Exactly vertical sides are handled correctly, so the snap
+    makes them exact. The shift is below `tol_m`, far below the resolution
+    of the fault model."""
+    v = v.copy()
+    xy = v[:, :2]
+    order = np.lexsort((xy[:, 1], xy[:, 0]))
+    group = np.arange(len(v))
+    for a, i in enumerate(order):                     # neighbours within tol in sorted x
+        for j in order[a + 1:]:
+            if xy[j, 0] - xy[i, 0] > tol_m:
+                break
+            if np.hypot(*(xy[j] - xy[i])) < tol_m:
+                gi, gj = group[i], group[j]
+                group[group == gj] = gi
+    for g in np.unique(group):
+        m = group == g
+        if m.sum() > 1:
+            v[m, :2] = xy[m].mean(axis=0)
+    return v
+
+
 def fault_triangles(fault: Fault, frame: LocalFrame, select: np.ndarray | None = None) -> np.ndarray:
     """The fault's triangles (or those in `select`) as M×3×3 local
-    coordinates, with vertices above sea level clamped to the surface."""
-    x, y = frame.xy(fault.lon, fault.lat)
-    z = np.minimum(fault.elev, 0.0)
-    v = np.stack([x, y, z], axis=1)
+    coordinates, with vertices above sea level clamped to the surface and
+    nearly vertical edges made exactly vertical (`snap_vertical`)."""
     tri = fault.tri if select is None else fault.tri[select]
-    return v[tri]
+    used, inverse = np.unique(tri, return_inverse=True)
+    x, y = frame.xy(fault.lon[used], fault.lat[used])
+    z = np.minimum(fault.elev[used], 0.0)
+    v = snap_vertical(np.stack([x, y, z], axis=1))
+    return v[inverse.reshape(tri.shape)]
 
 
 def station_displacement(fault: Fault, slip_m: np.ndarray, rake_deg, sta_lon, sta_lat,
