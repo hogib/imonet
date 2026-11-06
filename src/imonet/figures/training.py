@@ -1,10 +1,12 @@
 """Training curves of the trained models (runs/models/<name>/).
 
-One panel per model: the training loss every log_every steps (faint), its
-1,000-step running mean, and the validation loss at every evaluation (dark,
-markers). The training loss is noisy because the targets are heavy-tailed.
-The diffusion and regress losses are on different scales, so they never
-share an axis.
+Two panels, one per kind of model, since the diffusion (EDM) loss and the
+regression (squared-error) loss are on different scales: every model of a
+kind on one axis, so versions and training seeds can be compared directly.
+For each model the validation loss at every evaluation (markers) and the
+5,000-step running mean of the training loss (thin). The raw training loss
+is not drawn: it is noisy because the targets are heavy-tailed, and with
+several models it hides the rest.
 """
 
 from __future__ import annotations
@@ -16,7 +18,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from imonet.evaluate import RESULTS
-from imonet.figures.style import HALF, STYLE, WIDTH, method_style, save
+from imonet.figures.style import STYLE, WIDTH, method_style, save
+
+KINDS = (("diffusion", "Diffusion models: EDM loss"), ("regress", "Regression models: squared error"))
+# Line style per model version, in the family colour; unknown names get the last.
+VERSION_STYLES = ((":", "o"), ("--", "s"), ("-", "D"), ("-.", "^"), ((0, (5, 1, 1, 1, 1, 1)), "v"))
 
 
 def _models(root: Path) -> list[Path]:
@@ -24,29 +30,40 @@ def _models(root: Path) -> list[Path]:
             if (d / "steps.csv").exists() and (d / "history.json").exists() and (d / "config.json").exists()]
 
 
+def _label(name: str, kind: str) -> str:
+    """'diffusion-v3-s1' -> 'v3, seed 1'."""
+    rest = name.removeprefix(kind).strip("-")
+    version, _, seed = rest.partition("-s")
+    return f"{version}, seed {seed}" if seed else version or name
+
+
 def training_curves(out: Path, root: Path = RESULTS) -> Path | None:
     models = _models(root)
     if not models:
         return None
+    by_kind = {k: [d for d in models if json.loads((d / "config.json").read_text())["kind"] == k] for k, _ in KINDS}
+    kinds = [(k, t) for k, t in KINDS if by_kind[k]]
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, len(models), figsize=(WIDTH if len(models) > 1 else HALF + 0.5, 2.6),
-                                 squeeze=False)
-        for ax, d in zip(axes[0], models):
-            kind = json.loads((d / "config.json").read_text())["kind"]
-            st = method_style(kind)
-            steps = pd.read_csv(d / "steps.csv")
-            hist = pd.DataFrame(json.loads((d / "history.json").read_text()))
-            ax.plot(steps["step"] / 1000, steps["loss"], color=st["color"], lw=0.5, alpha=0.2)
-            ax.plot(steps["step"] / 1000, steps["loss"].rolling(10, min_periods=1).mean(), color=st["color"],
-                    lw=1.0, alpha=0.6, label="training (1,000-step mean)")
-            ax.plot(hist["step"] / 1000, hist["val_loss"], color=st["color"], lw=1.5, marker=st["marker"],
-                    markersize=3, label="validation")
-            ax.set_title(f"{d.name} ({st['label']})", fontsize=8, loc="left")
-            ax.set_xlabel("Step (thousands)")
-            ax.set_ylabel("EDM loss" if kind == "diffusion" else "Squared error")
-            lo = min(hist["val_loss"].min(), steps["loss"].quantile(0.02))
-            hi = max(hist["val_loss"].max(), steps["loss"].quantile(0.98))
-            ax.set_ylim(lo - 0.05 * (hi - lo), hi + 0.05 * (hi - lo))
-            ax.legend(loc="upper right")
-        fig.tight_layout()
+        fig, axes = plt.subplots(1, len(kinds), figsize=(WIDTH, 2.9), squeeze=False)
+        for ax, (kind, title) in zip(axes[0], kinds):
+            colour = method_style(kind)["color"]
+            lo, hi = float("inf"), float("-inf")
+            for i, d in enumerate(by_kind[kind]):
+                ls, marker = VERSION_STYLES[min(i, len(VERSION_STYLES) - 1)]
+                steps = pd.read_csv(d / "steps.csv")
+                hist = pd.DataFrame(json.loads((d / "history.json").read_text()))
+                train = steps["loss"].rolling(50, min_periods=1).mean()
+                ax.plot(steps["step"] / 1000, train, color=colour, lw=0.7, ls=ls, alpha=0.35)
+                ax.plot(hist["step"] / 1000, hist["val_loss"], color=colour, lw=1.3, ls=ls, marker=marker,
+                        markersize=2.5, markevery=max(1, len(hist) // 12), label=_label(d.name, kind))
+                lo = min(lo, hist["val_loss"].min(), train.quantile(0.02))
+                hi = max(hi, hist["val_loss"].quantile(0.9), train.quantile(0.9))
+            ax.set_ylim(lo - 0.05 * (hi - lo), hi + 0.15 * (hi - lo))
+            ax.set_title(title, fontsize=8, loc="left")
+            ax.set_xlabel("Training step (thousands)")
+            ax.set_ylabel("Loss")
+            ax.legend(loc="upper right", fontsize=7, title="validation", title_fontsize=7)
+        fig.text(0.5, 0.005, "Lines with markers: validation loss; thin lines: training loss, 5,000-step running mean.",
+                 ha="center", va="bottom", fontsize=7)
+        fig.tight_layout(rect=(0, 0.05, 1, 1))
         return save(fig, out, "training_curves")
