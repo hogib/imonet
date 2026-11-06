@@ -27,9 +27,9 @@ METHODS = {   # name: label
     "krige+noise": "kriging + noise",
     "gp": "space--time GP",
     "gp-given": "space--time GP, level given",
-    "regress-v2": "regress v2",
-    "diffusion-v3-unknown": "diffusion v3",
-    "diffusion-v3-given": "diffusion v3, level given",
+    "regress-v2": "regress",
+    "diffusion-v3-unknown": "diffusion",
+    "diffusion-v3-given": "diffusion, level given",
 }
 PERIOD_LABELS = {"main": "Main: 2013--2015", "sparse": "Sparse: 2016 on", "infit": "In-fit: 2009--2015"}
 PAIRS = (("diffusion-v3-unknown", "gp"), ("diffusion-v3-given", "gp-given"), ("diffusion-v3-unknown", "idw+noise"))

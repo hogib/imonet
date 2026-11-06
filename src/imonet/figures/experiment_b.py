@@ -29,17 +29,16 @@ DENSITY_ORDER = ("full", "25km", "60km", "100km")
 # (diffusion-v3, regress-v2) solid.
 _OLD = {"linestyle": (0, (4, 2)), "markerfacecolor": "white"}
 B_VARIANTS = {
-    "diffusion": ("diffusion", "diffusion v1", {"linestyle": (0, (1, 1.5)), "markerfacecolor": "white"}),
-    "diffusion-v2": ("diffusion", "diffusion v2", _OLD),
-    "diffusion-v2-given": ("diffusion", "diffusion v2, level given", _OLD),
-    "diffusion-v3": ("diffusion", "diffusion v3 (transients)", {}),
-    "diffusion-v3-given": ("diffusion", "diffusion v3, level given", {}),
-    "regress": ("regress", "regress v1", _OLD),
-    "regress-v2": ("regress", "regress v2 (transients)", {}),
-    "regress-v2-given": ("regress", "regress v2, level given", {}),
+    "diffusion-v3": ("diffusion", "diffusion", {}),
+    "diffusion-v3-given": ("diffusion", "diffusion, level given", {"marker": "o"}),
+    "diffusion-v2": ("diffusion", "diffusion without transients", _OLD),
+    "regress-v2": ("regress", "regress", {}),
+    "regress": ("regress", "regress without transients", _OLD),
 }
+# Earlier models with Ridgecrest results that the paper does not report.
+NOT_REPORTED = ("diffusion", "diffusion-v2-given", "regress-v2-given")
 B_METHODS = {k: v[0] for k, v in B_VARIANTS.items() if k != v[0]}
-SINGLE = ("idw", "krige", "regress", "regress-v2", "regress-v2-given")      # one series, no ensemble range
+SINGLE = ("idw", "krige", "regress", "regress-v2")      # one series, no ensemble range
 
 
 def _style(name: str) -> dict:
@@ -127,6 +126,8 @@ def ridgecrest_table(out: Path, root: Path = RESULTS, name: str = "b_ridgecrest_
     rows = []
     for p in sorted((root / "B").glob("*/ridgecrest/*/summary.json")):
         s = json.loads(p.read_text())
+        if p.parent.parent.parent.name in NOT_REPORTED:
+            continue
         rows.append({"method": p.parent.parent.parent.name, "density": s["density"], **s})
     if not rows:
         return None

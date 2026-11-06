@@ -42,7 +42,12 @@ METHODS = {   # name: (label, colour, marker, linestyle)
     "krige": ("krige", MAGENTA, "v", "-"),
     "krige+noise": ("krige + noise", GREEN, "P", "-"),
     "gp": ("space–time GP", VIOLET, "X", "-"),
+    # the models of the paper: diffusion v3 and regress v2, without the station's noise level
+    "diffusion-v3-unknown": ("diffusion", AQUA, "D", "-"),
+    "regress-v2": ("regress", YELLOW, "^", "-"),
 }
+# The methods compared in the paper's main figures and tables, in this order.
+MAIN = ("zero", "idw", "idw+noise", "regress-v2", "krige", "krige+noise", "gp", "diffusion-v3-unknown")
 COMPONENTS = ("East", "North", "Up")
 
 STYLE = {

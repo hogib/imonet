@@ -24,8 +24,8 @@ from imonet.cube import HELD_OUT, VALIDATION, Cube
 from imonet.data import component_scale
 from imonet.evaluate import DENSITIES, RESULTS, density_name, network, predict
 from imonet.baselines import make
-from imonet.figures.style import (BASELINE, COMPONENTS, INK, INK_2, METHODS, STYLE, SURFACE, WIDTH, method_style,
-                                  save)
+from imonet.figures.style import (BASELINE, COMPONENTS, INK, INK_2, MAIN, METHODS, STYLE, SURFACE, WIDTH,
+                                  method_style, save)
 from imonet.metrics import BANDS_DAYS
 
 DENSITY_ORDER = [density_name(d) for d in DENSITIES]
@@ -43,7 +43,7 @@ def _ordered_methods(df: pd.DataFrame) -> list[str]:
     compared in `variants`, single networks in `generators`."""
     densities = set(df["density"])
     done = {m for m, g in df.groupby("method") if densities <= set(g["density"])}
-    return [m for m in METHODS if m in done]
+    return [m for m in MAIN if m in done]
 
 
 def _x(densities) -> np.ndarray:
@@ -104,7 +104,7 @@ def correlation_by_distance(split: str, density: str, out: Path, root: Path = RE
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(WIDTH / 2, 2.6))
         truth = None
-        for m in [k for k in METHODS if k in files]:
+        for m in [k for k in MAIN if k in files]:
             c = pd.read_csv(files[m], index_col=0)
             x = np.arange(len(c))
             truth = (x, c["corr_truth"].to_numpy(), list(c.index))
@@ -129,7 +129,7 @@ def spectra(split: str, density: str, out: Path, root: Path = RESULTS, seed: int
     with plt.rc_context(STYLE):
         fig, axes = plt.subplots(1, 3, figsize=(WIDTH, 2.3), sharey=True)
         for k, (ax, comp) in enumerate(zip(axes, "enu")):
-            for m in [k_ for k_ in METHODS if k_ in runs]:
+            for m in [k_ for k_ in MAIN if k_ in runs]:
                 y = [runs[m].get(f"psd_log10_{lo}_{hi}_{comp}", np.nan) for lo, hi in BANDS_DAYS]
                 ax.plot(range(len(bands)), y, **method_style(m))
             ax.axhline(0, color=INK_2, lw=0.8, ls=(0, (1, 2)))
@@ -146,11 +146,12 @@ def example(cube: Cube, out: Path, method: str = "idw+noise", density: float | N
             model_dir: Path | None = None) -> Path | None:
     """One held-out station in its first validation window: the truth, a
     few samples and the sample mean, per component."""
-    if method == "diffusion":
+    if method in ("diffusion", "diffusion-v3-unknown"):
         if model_dir is None or not (model_dir / "checkpoint.pt").exists():
             return None
         from imonet.model.methods import DiffusionMethod
         m = DiffusionMethod(model_dir, n_samples=32)
+        method = "diffusion-v3-unknown"
     else:
         tuning = root / "A" / "idw_tuning.json"
         if method in ("idw", "idw+noise") and not tuning.exists():
@@ -177,7 +178,7 @@ def example(cube: Cube, out: Path, method: str = "idw+noise", density: float | N
             ax.set_ylabel(f"{COMPONENTS[k]} (mm)")
         axes[0].legend(ncol=3, loc="lower right", bbox_to_anchor=(1.0, 1.0), borderaxespad=0.1)
         axes[0].set_title(f"{cube.sta[s]}, {st['label']}, network {density_name(density)}", fontsize=8, loc="left")
-        return save(fig, out, f"example_{method.replace('+', '_')}")
+        return save(fig, out, f"example_{'diffusion' if method.startswith('diffusion') else method.replace('+', '_')}")
 
 
 TABLE_COLS = (("nrmse_fast", "nRMSE$_f$"), ("crps_fast", "CRPS$_f$"), ("crps_total", "CRPS$_t$"),
@@ -269,8 +270,8 @@ def _network_runs(split: str, root: Path, density: str, seed: int) -> list[dict]
     return rows
 
 
-GENERATORS = ("idw+noise", "krige+noise", "gp-moments", "gp", "diffusion")
-GENERATOR_LABELS = {"gp-moments": "GP, mean fit", "gp": "GP, median fit"}
+GENERATORS = ("idw+noise", "krige+noise", "gp", "diffusion-v3-unknown")
+GENERATOR_LABELS = {}
 GENERATOR_COLS = (("crps_fast", "CRPS$_f$"), ("energy_total", "Energy"), ("cover90_fast", "Cov.$_{90,f}$"),
                   ("spread_skill", "S/E"), ("spread_skill_pooled", "S/E$_\\mathrm{pool}$"),
                   ("scale_log2", "Scale"), ("tail_log2", "Tail"), ("psd_log10_64_128", "PSD$_{64\\text{--}128}$"),
@@ -333,9 +334,8 @@ def variants(split: str, out: Path, root: Path = RESULTS, density: str = "60km",
 # The diffusion models and the GP with and without the target's noise level:
 # one colour per model family, line style for the mode.
 NOISE_MODELS = (
-    ("diffusion", "diffusion v1", {"linestyle": (0, (1, 1.5)), "markerfacecolor": "white"}),
-    ("diffusion-v2-unknown", "diffusion v2, level unknown", {}),
-    ("diffusion-v2-given", "diffusion v2, level given", {"marker": "o"}),
+    ("diffusion-v3-unknown", "diffusion, level unknown", {}),
+    ("diffusion-v3-given", "diffusion, level given", {"marker": "o"}),
     ("gp", "GP, level unknown", {}),
     ("gp-given", "GP, level given", {"marker": "o", "linestyle": (0, (4, 2))}),
 )
@@ -412,13 +412,12 @@ def noise_models_table(df: pd.DataFrame, out: Path, name: str = "noise_models_ta
 # The models trained with planted transients (docs/00-design.md §4.3) against
 # the same models without them.
 TRANSIENT_MODELS = (
-    ("diffusion-v2-unknown", "diffusion v2, level unknown"),
-    ("diffusion-v3-unknown", "diffusion v3, level unknown"),
-    ("diffusion-v2-given", "diffusion v2, level given"),
-    ("diffusion-v3-given", "diffusion v3, level given"),
-    ("regress", "regress v1"),
-    ("regress-v2", "regress v2"),
-    ("regress-v2-given", "regress v2, level given"),
+    ("diffusion-v3-unknown", "diffusion, level unknown"),
+    ("diffusion-v2-unknown", "diffusion without transients, level unknown"),
+    ("diffusion-v3-given", "diffusion, level given"),
+    ("diffusion-v2-given", "diffusion without transients, level given"),
+    ("regress-v2", "regress"),
+    ("regress", "regress without transients"),
 )
 TRANSIENT_COLS = (("crps_fast", "CRPS$_f$"), ("nrmse_fast", "nRMSE$_f$"), ("energy_total", "ES"),
                   ("cover90_fast", "Cov.$_{90,f}$"), ("spread_skill", "S/E"),

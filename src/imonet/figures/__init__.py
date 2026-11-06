@@ -12,7 +12,7 @@ from pathlib import Path
 from imonet.cube import Cube
 from imonet.evaluate import RESULTS
 
-DIFFUSION_MODEL = "diffusion-v1"      # the model drawn in example figures
+DIFFUSION_MODEL = "diffusion-v3"      # the model drawn in example figures
 FIGURES = ("network_map", "thinning", "training", "scores_by_density", "calibration", "correlation", "spectra",
            "example", "table", "variants", "generators", "noise_models", "significance", "b", "c")
 
