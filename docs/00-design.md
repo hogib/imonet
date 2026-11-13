@@ -314,7 +314,7 @@ covariances; Langbein (2008) for Gauss–Markov noise in GNSS series. Tian
 and Shen (2016) weight neighbours by the correlation of their past
 residuals with the target's, which a virtual station has none of; Shen et
 al. (2015) and Sandwell and Wessel (2016) interpolate velocity fields
-without uncertainty; Qiu et al. (2024) fill gaps from a station's own data.
+without uncertainty; Qiu et al. (2024) fill gaps with a Gaussian process that also uses adjacent stations.
 None is reimplemented.
 
 Details (`imonet.baselines`):

@@ -165,7 +165,7 @@ field that does not change from day to day. For time series, \citet{tian2016} es
 the regional common mode with neighbours weighted by their distance and by the
 correlation of their long-term residuals with the target's, which requires a record at
 the target, and \citet{qiu2024} filled gaps in GNSS position series with an improved
-Gaussian process applied to the station's own record. Closest to the present task,
+Gaussian process that also uses the series of adjacent stations. Closest to the present task,
 \citet{li2023interp} predicted the series of each of five stations in North China from
 those of the others with gradient-boosted trees and random forests; for scattered missing
 days, the vertical precision improved by 45\% over cubic splines. These predictions are
@@ -183,7 +183,7 @@ Cascadia from 2007 to 2022, where it retrieved 87.5\% of previously catalogued e
 Graph neural networks denoise the series of irregular networks whose stations come and
 go: trained on the same kind of synthetic data, SSEdenoiser extracts slow slip from raw
 Cascadia series \citep{costantino2024}, and \citet{bachelot2025} reconstructed each
-station's noise from its eight nearest stations beyond 40~km, reducing the common-mode
+station's noise from its eight nearest stations beyond 400~km, reducing the common-mode
 noise of the horizontal components by more than 70\% and 30\% in two processing
 solutions. In denoising, the part of a station that its neighbours predict is removed as
 noise and the remainder is kept as signal; here, that part is the starting point, and the
@@ -1272,7 +1272,7 @@ cannot tell from real stations, it is calibrated across stations once told the s
 noise level, and it passes on localised signals larger than the gaps between stations,
 including the offsets of the 2019 Ridgecrest earthquakes from a network thinned to 60~km.
 Applied without retraining to T\"urkiye it remains the best method. The remaining work is
-the Kahramanmara\c{s} case study, which needs a published rupture geometry, the stitching
+the Kahramanmara\c{s} case study, the stitching
 of windows into long series, and the single evaluation on the test period.
 
 \section*{Acknowledgements}
