@@ -318,7 +318,8 @@ The T\"urkiye data are used only for testing.
 Three further sets of days are studied separately. From 2016 on, outside the
 Kahramanmara\c{s} window, the network is sparse. The period from 30 days before to 365
 days after the 2023-02-06 Kahramanmara\c{s} earthquakes ($M_w$~7.8 and 7.6), whose
-coseismic offsets reach metres, is a case study. And the same stations with the
+coseismic offsets reach metres, is left out of the scores and set aside for a case study
+that is not part of this report. And the same stations with the
 trajectory fitted to 2019 give 2009--2015 inside the fit years, to measure what scoring
 inside a fit changes.
 
@@ -717,9 +718,8 @@ drops stations for site trouble checks the scored period's own days, so that a s
 not dropped from 2013--2015 for trouble years later; stations with too short a record
 before the fit's end, whose trajectory is fitted to the start of their record and so
 overlaps the scored days, are left out; and the Kahramanmara\c{s} window is skipped. The
-Kahramanmara\c{s} sequence is analysed separately: the coseismic offsets and the first
-year of postseismic deformation of virtual stations near the rupture are compared with
-the observed ones, as a function of distance from the rupture and from the nearest station.
+Kahramanmara\c{s} sequence is not analysed here; a case study of its coseismic offsets
+and first year of postseismic deformation at virtual stations near the rupture is planned.
 
 \section{Results}
 \label{sec:results}
@@ -948,7 +948,7 @@ which is why the results without it are the main ones.
   correlation over distance classes.}
   \label{tab:generators}
   \footnotesize
-  \setlength{\tabcolsep}{3pt}
+  \setlength{\tabcolsep}{2.5pt}
   \maybetable{generators_table}
 \end{table}
 
@@ -1016,7 +1016,7 @@ recognisably synthetic.
   \label{tab:transients}
   \scriptsize
   \setlength{\tabcolsep}{2.5pt}
-  \maybetable{transients_table}
+  \resizebox{\linewidth}{!}{\maybetable{transients_table}}
 \end{table}
 
 \paragraph{Planted transients cost nothing on ordinary days} The model trained without
@@ -1105,8 +1105,8 @@ probabilistic accuracy and the calibrated range of Section~\ref{sec:resultsa}.
     observed offset, median error of the generated offset, and the share of offset
   components inside the 90\% range of the samples.}
   \label{tab:ridgecrest}
-  \footnotesize
-  \setlength{\tabcolsep}{2pt}
+  \scriptsize
+  \setlength{\tabcolsep}{3pt}
   \maybetable{b_ridgecrest_table}
 \end{table}
 
@@ -1255,7 +1255,14 @@ cause (Figure~\ref{fig:example_diffusion}), and the classifier detects the sampl
 at spacings of 60~km and more. The planted-event results are medians over target--event
 pairs, which favour large events; per event every method recovers less. The largest
 afterslip signals, at stations close to an event, are passed on only in part by every
-method. Windows are generated independently and not yet stitched into long series.
+method. Each window's mean and trend are removed before generation and scoring
+(Section~\ref{sec:detrend}), so the model generates the variations within a 256-day
+window and not the slow part of a station's motion. Signals that grow over months are
+mostly removed with the trend: a planted afterslip event that moves a station by 12~mm
+leaves a detrended signal of 0.4~mm r.m.s. A virtual station's rate, seasonal terms and
+any offset between windows are not generated. Windows are also generated independently,
+so consecutive windows are not continuous where they join, and stitching them into long
+series has not been attempted.
 Stations are treated as independent in the paired tests, which makes the bootstrap
 intervals somewhat optimistic; the counts of stations are not affected. All results are
 on the validation period; the test period has not been used.
