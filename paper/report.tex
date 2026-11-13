@@ -646,7 +646,8 @@ series jumped without a listed cause, after 2019 are excluded from scoring (one 
     in the conditional variant, its correlation and scale ratio with the mean of its four
     nearest neighbours. A small convolutional network on the series is a second check,
     and IDW without noise is a positive control. An accuracy of 0.5 means the two are
-    indistinguishable; an exact binomial test gives its significance, and a paired test
+    indistinguishable; an exact one-sided binomial test gives its significance, since only
+    an accuracy above 0.5 is evidence of a difference, and a paired test
     and a bootstrap over stations agree with it.
 \end{description}
 Differences between two methods are tested on the same stations and networks. The
@@ -974,7 +975,7 @@ excess is not made of isolated outliers, and unscreened scores are reported thro
     classifier in telling real from generated windows of the 103 held-out stations scored
     for it (386 test examples, 193 windows, per cell); 0.5 is indistinguishable. Marginal:
     the window alone; conditional: with its four nearest neighbours. * significantly above
-  0.5 ($p < 0.05$). IDW without noise was tested on the full network and at 60~km only.}
+  0.5 (one-sided $p < 0.05$). IDW without noise was tested on the full network and at 60~km only.}
   \label{tab:c2st}
   \footnotesize
   \setlength{\tabcolsep}{3pt}
@@ -1003,7 +1004,7 @@ cannot be told apart from real ones on the full network and at 25~km (accuracy
 0.50--0.52), and are separated only weakly at 60 and 100~km (0.53--0.57, significant in
 six of eight cells). A convolutional classifier, the second check, is weaker, but never
 separates the diffusion samples from real ones (0.46--0.52), while it detects the
-Gaussian generators in 11 of their 12 marginal cells (0.58--0.75). Their CRPS differs
+Gaussian generators in all 12 of their marginal cells (0.55--0.75). Their CRPS differs
 from the Gaussian process's by a few per cent, but only the Gaussian samples are
 recognisably synthetic.
 

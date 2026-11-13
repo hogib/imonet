@@ -175,8 +175,9 @@ def main(argv: list[str] | None = None) -> None:
 
     rs = sub.add_parser("rescore", help="recompute run summaries from their per-station scores")
     rs.add_argument("--split", choices=list(SPLITS), default="validation")
-    rs.add_argument("--experiment", choices=["A", "B"], default="A",
-                    help="A: runs/A summaries; B: planted events and Ridgecrest (runs/B)")
+    rs.add_argument("--experiment", choices=["A", "B", "C2ST"], default="A",
+                    help="A: runs/A summaries; B: planted events and Ridgecrest (runs/B); "
+                         "C2ST: p-values of the classifier tests from their stored predictions")
 
     r = sub.add_parser("report", help="print the experiment A table")
     r.add_argument("--split", choices=list(SPLITS), default="validation")
@@ -286,6 +287,10 @@ def main(argv: list[str] | None = None) -> None:
                       f"stations, sign test p = {r['sign_p']:.2g} ({r['seeds']} networks)")
         return
     if a.cmd == "rescore":
+        if a.experiment == "C2ST":
+            from imonet.c2st import retest
+            print(f"recomputed the p-values of {retest(a.results)} classifier tests")
+            return
         if a.experiment == "B":
             from imonet.experiment_b import rescore as rescore_b
             print(f"rescored {rescore_b(Cube.load(a.cube), a.split, a.results)} runs of experiment B")

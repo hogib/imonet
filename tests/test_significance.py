@@ -17,6 +17,14 @@ def write_runs(root, method, shift, seeds=(0, 1), n=60, seed=0):
         df.to_csv(d / "stations.csv", index=False)
 
 
+def test_binomial_greater():
+    from imonet.significance import binomial_greater
+    assert binomial_greater(5, 10) == pytest.approx(638 / 1024)
+    assert binomial_greater(10, 10) == pytest.approx(1 / 1024)
+    assert binomial_greater(0, 10) == pytest.approx(1.0)
+    assert binomial_greater(0, 0) == 1.0
+
+
 def test_binomial_two_sided():
     assert binomial_two_sided(5, 10) == pytest.approx(1.0)
     assert binomial_two_sided(0, 10) == pytest.approx(2 / 1024)

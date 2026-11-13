@@ -6,7 +6,9 @@ Following the paper (§2): pool real and generated examples labelled 0 and
 classifier on the first, and take its accuracy t̂ on the second. Under
 H0 (real and generated equal in distribution) n_te·t̂ is Binomial(n_te,
 1/2), which gives an exact p-value; an accuracy near 0.5 means the
-classifier cannot tell them apart. Its predictions show where they differ.
+classifier cannot tell them apart. The test is one-sided, as in the paper:
+only an accuracy above 1/2 is evidence of a difference, and one below it
+on test data is chance. Its predictions show where they differ.
 Here the examples come in pairs (the real and the generated version of one
 window), which that p-value treats as independent; a paired test
 (`paired_accuracy`, `paired_p_value`: how often the generated version gets
@@ -56,7 +58,7 @@ from imonet.data import WINDOW_DAYS, detrend
 from imonet.evaluate import RESULTS, Setup, method_for, network, predict, screened
 from imonet.metrics import fast_part, slow_part
 from imonet.progress import progress_line
-from imonet.significance import binomial_two_sided
+from imonet.significance import binomial_greater
 
 STRIDE = 64
 N_NEIGHBOURS = 4
@@ -322,6 +324,42 @@ def fit_logistic(x: np.ndarray, y: np.ndarray, lam: float) -> tuple[np.ndarray, 
     return wgt.detach().numpy(), float(b.detach())
 
 
+def p_values(ex: pd.DataFrame) -> dict:
+    """One-sided exact tests of the test predictions `ex` (one row per
+    example: station, t0, generated, p_generated).
+
+    `p_value`: the number of correct examples against Binomial(n, 1/2).
+    Paired test: the real and generated versions of a window are one trial.
+    Under H0 they are exchangeable, so the generated one gets the higher
+    p_generated with probability 1/2 (ties left out); this does not treat
+    the two versions as independent examples, as the first test does."""
+    correct = ((ex.p_generated > 0.5).astype(int) == ex.generated)
+    key = ["station", "t0"]
+    pg = ex[ex.generated == 1].set_index(key).p_generated
+    pr = ex[ex.generated == 0].set_index(key).p_generated.reindex(pg.index)
+    decided = pg != pr
+    pair_wins, pairs = int((pg[decided] > pr[decided]).sum()), int(decided.sum())
+    return {"p_value": binomial_greater(int(correct.sum()), len(ex)), "windows": int(len(pg)),
+            "paired_accuracy": pair_wins / max(pairs, 1), "paired_p_value": binomial_greater(pair_wins, pairs)}
+
+
+def retest(root: Path = RESULTS) -> int:
+    """Recompute the p-values of every stored classifier test under `root`
+    from its examples.csv, without retraining a classifier (`imonet rescore
+    --experiment C2ST`). Returns the number of summaries rewritten."""
+    done = 0
+    for path in sorted((root / "C2ST").glob("*/*/*/*/summary.json")):
+        ex = pd.read_csv(path.with_name("examples.csv"))
+        summary = json.loads(path.read_text())
+        tests = p_values(ex)
+        if len(ex) != summary["test_examples"] or tests["windows"] != summary["windows"]:
+            raise ValueError(f"{path}: examples.csv does not match the summary")
+        summary |= {"p_value": tests["p_value"], "paired_p_value": tests["paired_p_value"], "alternative": "greater"}
+        path.write_text(json.dumps(summary, indent=1))
+        done += 1
+    return done
+
+
 def run(w: dict, variant: str, cfg: TrainConfig = TrainConfig(), device=None, log=None) -> tuple[dict, pd.DataFrame]:
     """Two-fold cross-fitted C2ST on windows w: (summary, per-example test
     predictions)."""
@@ -370,15 +408,7 @@ def run(w: dict, variant: str, cfg: TrainConfig = TrainConfig(), device=None, lo
     ex = pd.DataFrame(rows)
     correct = ((ex.p_generated > 0.5).astype(int) == ex.generated)
     n, c = len(ex), int(correct.sum())
-    # Paired test: the real and generated versions of a window are one trial.
-    # Under H0 they are exchangeable, so the generated one gets the higher
-    # p_generated with probability 1/2 (ties left out); this does not treat
-    # the two versions as independent examples, as the binomial above does.
-    key = ["station", "t0"]
-    pg = ex[ex.generated == 1].set_index(key).p_generated
-    pr = ex[ex.generated == 0].set_index(key).p_generated.reindex(pg.index)
-    decided = pg != pr
-    pair_wins, pairs = int((pg[decided] > pr[decided]).sum()), int(decided.sum())
+    tests = p_values(ex)
     # station-block bootstrap of the accuracy (windows of a station are not independent)
     by_station = correct.groupby(ex.station).agg(["sum", "count"])
     boot = []
@@ -387,9 +417,9 @@ def run(w: dict, variant: str, cfg: TrainConfig = TrainConfig(), device=None, lo
         boot.append(pick["sum"].sum() / pick["count"].sum())
     lo, hi = np.quantile(boot, [0.025, 0.975])
     summary = {"variant": variant, "classifier": cfg.classifier, "test_examples": n, "accuracy": c / n, "ci_low": float(lo), "ci_high": float(hi),
-               "p_value": binomial_two_sided(c, n), "stations": int(len(stations)),
-               "windows": int(len(pg)), "paired_accuracy": pair_wins / max(pairs, 1),
-               "paired_p_value": binomial_two_sided(pair_wins, pairs),
+               "p_value": tests["p_value"], "stations": int(len(stations)),
+               "windows": tests["windows"], "paired_accuracy": tests["paired_accuracy"],
+               "paired_p_value": tests["paired_p_value"], "alternative": "greater",
                "accuracy_real": float(correct[ex.generated == 0].mean()),
                "accuracy_generated": float(correct[ex.generated == 1].mean())}
     return summary, ex

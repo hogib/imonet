@@ -643,6 +643,11 @@ Dependencies: numpy, pandas, scipy, torch, cutde.
   network median ρ v3 0.41, GP 0.37, v2 0.23; over all networks v3 exceeds
   the GP for footprints > 4× the gap (0.62 vs 0.57) and 2–4× (0.22 vs
   0.10). The B numbers in the entries above predate this.
+- C2ST p-values (2026-11-13): one-sided, as in Lopez-Paz & Oquab (only an
+  accuracy above 0.5 counts); the stored two-sided values were recomputed
+  from the test predictions (`imonet rescore --experiment C2ST`). No
+  feature-classifier cell changes significance; the CNN's GP cell at
+  100 km (marginal, 0.55) becomes significant.
 - Experiment C (2026-10-18, `imonet eval-c`, nothing tuned on Türkiye):
   main period 2013–2015 (dense network, fit to 2012): diffusion v3 fast CRPS
   0.369 (level given 0.368) vs GP 0.376 (0.375), IDW/kriging + noise 0.380;

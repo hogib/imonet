@@ -65,6 +65,14 @@ def binomial_two_sided(k: int, n: int) -> float:
     return min(1.0, 2 * tail)
 
 
+def binomial_greater(k: int, n: int) -> float:
+    """Exact one-sided p-value of k or more successes in n trials with
+    p = 1/2: only an excess of successes counts against H0."""
+    if n == 0:
+        return 1.0
+    return sum(math.comb(n, i) for i in range(k, n + 1)) / 2 ** n
+
+
 def compare(a: str, b: str, score: str = "crps_fast", split: str = "validation", density: str = "60km",
             root: Path = RESULTS, seed: int = 0, n_boot: int = N_BOOT) -> dict:
     """Paired comparison of methods a and b; negative differences mean a is
